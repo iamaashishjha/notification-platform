@@ -1,0 +1,143 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: notification
+      POSTGRES_USER: notification
+      POSTGRES_PASSWORD: notification
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notification -d notification"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: notification
+      RABBITMQ_DEFAULT_PASS: notification
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./notification-core-api/migrations:/migrations:ro
+    command: ["-path", "/migrations", "-database", "postgres://notification:notification@postgres:5432/notification?sslmode=disable", "up"]
+
+  seed:
+    image: postgres:16-alpine
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    working_dir: /app
+    volumes:
+      - ./notification-core-api/seeds:/app/seeds:ro
+    environment:
+      PGPASSWORD: notification
+    command: ["psql", "-h", "postgres", "-U", "notification", "-d", "notification", "-f", "seeds/local_seed.sql"]
+
+  notification-api:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: api
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  worker-router:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-router
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on: [notification-api]
+
+  worker-scheduler:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-scheduler
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on: [notification-api]
+
+  worker-email:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-email
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on: [notification-api]
+
+  worker-sms:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-sms
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on: [notification-api]
+
+  worker-fcm:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-fcm
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on: [notification-api]
+
+  worker-websocket:
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-websocket
+    env_file:
+      - ./notification-core-api/.env.example
+    depends_on: [notification-api]
+
+  notification-admin-ui:
+    build:
+      context: ./notification-admin-ui
+      target: dev
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+    depends_on:
+      - notification-api
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./notification-admin-ui/src:/app/src
+
+volumes:
+  postgres-data:
