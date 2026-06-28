@@ -22,6 +22,7 @@ type Config struct {
 	RefreshTokenTTL   time.Duration
 	AccessTokenTTL    time.Duration
 	WebSocketTokenTTL time.Duration
+	EncryptionKey    string
 }
 
 func Load() Config {
@@ -48,6 +49,7 @@ func Load() Config {
 		RefreshTokenTTL:   time.Duration(envInt("REFRESH_TOKEN_TTL_HOURS", 24*14)) * time.Hour,
 		AccessTokenTTL:    time.Duration(envInt("ACCESS_TOKEN_TTL_MINUTES", 15)) * time.Minute,
 		WebSocketTokenTTL: time.Duration(envInt("WEBSOCKET_TOKEN_TTL_SECONDS", 60)) * time.Second,
+		EncryptionKey:     env("APP_ENCRYPTION_KEY", "local-dev-change-me-must-be-32-bytes!"),
 	}
 }
 

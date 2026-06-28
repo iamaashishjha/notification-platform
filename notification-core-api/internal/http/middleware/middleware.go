@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"runtime/debug"
 	"slices"
 	"strings"
+	"time"
 
 	"notification-core-api/internal/auth"
-	"notification-core-api/internal/security"
+	"notification-core-api/internal/metrics"
 
 	"go.uber.org/zap"
 )
@@ -45,7 +47,7 @@ func CORS(origins []string) func(http.Handler) http.Handler {
 	}
 }
 
-func RequestLog(log *zap.Logger) func(http.Handler) http.Handler {
+func RequestLog(log *zap.Logger, metricsCollector ...*metrics.Collector) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := r.Header.Get("X-Request-ID")
@@ -54,15 +56,114 @@ func RequestLog(log *zap.Logger) func(http.Handler) http.Handler {
 			}
 			w.Header().Set("X-Request-ID", requestID)
 			ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
-			log.Info("request received",
+			start := time.Now()
+
+			remoteIP := r.RemoteAddr
+			if idx := strings.LastIndex(remoteIP, ":"); idx > 0 {
+				remoteIP = remoteIP[:idx]
+			}
+			userAgent := r.UserAgent()
+			if len(userAgent) > 120 {
+				userAgent = userAgent[:120]
+			}
+
+			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(sw, r.WithContext(ctx))
+
+			duration := time.Since(start)
+			var tenantID, actorID string
+			if p, ok := Principal(ctx); ok {
+				actorID = p.UserID
+				tenantID = p.TenantID
+			}
+			if tid := TenantID(ctx); tid != "" {
+				tenantID = tid
+			}
+
+			log.Info("request completed",
 				zap.String("request_id", requestID),
 				zap.String("method", r.Method),
 				zap.String("path", r.URL.Path),
-				zap.String("authorization", security.MaskToken(r.Header.Get("Authorization"))),
+				zap.Int("status", sw.status),
+				zap.Float64("duration_ms", float64(duration.Milliseconds())),
+				zap.String("remote_ip", remoteIP),
+				zap.String("user_agent", userAgent),
+				zap.String("tenant_id", tenantID),
+				zap.String("actor_id", actorID),
 			)
-			next.ServeHTTP(w, r.WithContext(ctx))
+
+			if len(metricsCollector) > 0 && metricsCollector[0] != nil {
+				mc := metricsCollector[0]
+				pathGroup := normalizePath(r.URL.Path)
+				mc.RecordRequest(r.Method, pathGroup, sw.status, duration)
+			}
 		})
 	}
+}
+
+func PanicRecovery(log *zap.Logger, metricsCollector ...*metrics.Collector) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					requestID := RequestID(r.Context())
+					log.Error("panic recovered",
+						zap.String("request_id", requestID),
+						zap.Any("panic", rec),
+						zap.String("method", r.Method),
+						zap.String("path", r.URL.Path),
+						zap.ByteString("stack", debug.Stack()),
+					)
+					if len(metricsCollector) > 0 && metricsCollector[0] != nil {
+						metricsCollector[0].IncPanic()
+					}
+					writeError(w, http.StatusInternalServerError, "internal server error")
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sw *statusWriter) WriteHeader(code int) {
+	sw.status = code
+	sw.ResponseWriter.WriteHeader(code)
+}
+
+func normalizePath(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i, p := range parts {
+		if isUUID(p) || isNumeric(p) {
+			parts[i] = "{id}"
+		}
+	}
+	return "/" + strings.Join(parts, "/")
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func isNumeric(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return len(s) > 0
 }
 
 func JWT(svc auth.Service) func(http.Handler) http.Handler {
@@ -119,6 +220,16 @@ func RequireScope(scope string) func(http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func Chain(svc auth.Service, permission string, next http.HandlerFunc) http.Handler {
+	return JWT(svc)(RequirePermission(svc, permission)(http.HandlerFunc(next)))
+}
+
+func APIKeyScope(svc auth.Service, scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return APIKey(svc)(RequireScope(scope)(next))
 	}
 }
 

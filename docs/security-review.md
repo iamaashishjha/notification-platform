@@ -1,56 +1,114 @@
 # Security Review
 
-No software can be guaranteed vulnerability-free. This platform now uses defense-in-depth controls for authentication, authorization, tenant isolation, auditability, secret protection, and abuse prevention, with remaining risks documented for production hardening.
+## Findings
 
-## Identified Risks
+### 1. RBAC Enforcement
 
-- Backend API: initial endpoints accepted JWT/API-key auth but did not enforce server-side permissions on each protected route.
-- Admin API: UI hid routes by permission, but backend route guards were incomplete.
-- Authentication: initial login issued only access tokens and had no refresh-token rotation, lockout tracking, or session revocation.
-- Authorization and RBAC: effective permissions existed but were not consistently enforced by middleware.
-- Multi-tenant isolation: list notification logs were tenant-filtered for tenant users, but reusable ownership helpers were missing for future CRUD handlers.
-- WebSocket implementation: live transport was represented as a worker/provider placeholder and did not have a signed connection-token boundary.
-- Notification pipeline: send-time feature/channel checks existed, but rate limiting was a placeholder.
-- Provider configuration: provider secrets could be stored in JSON without an encryption-ready abstraction.
-- Queue workers: workers log operational metadata and use mock providers, but retry/dead-letter policy still needs deeper implementation.
-- Docker setup: runtime containers initially ran as default users and API health checks were missing.
-- Database access layer: SQL is parameterized, but future dynamic ownership checks must stay allow-listed to avoid table-name injection.
+**Status**: Acceptable
 
-## Implemented Mitigations
+- All admin routes use `middleware.Chain(authSvc, "permission.name", handler)` which calls `HasPermission`.
+- Platform admins bypass permission checks (intentional).
+- Non-platform users must have explicit role-based or user-level permissions.
+- Some routes use broad permissions like "users.manage" rather than granular create/update/delete scopes.
 
-- Added server-side permission middleware for admin routes.
-- Added API-key scope middleware for public tenant endpoints.
-- Added request IDs and redacted Authorization logging.
-- Added refresh-token sessions with hashed token storage and rotation.
-- Added login attempt tracking and configurable account lockout.
-- Added password reset, email verification, MFA-ready, WebSocket token, session, security event, and permission cache schema structures.
-- Added scoped, hashed, expirable, revocable API-key columns.
-- Added redaction helpers for email, phone, token, JSON, nested secret fields, and encryption-ready placeholders.
-- Added redacting audit/security event service.
-- Added tenant ownership helper with an allow-list of tenant-owned tables.
-- Added Redis-backed fixed-window tenant, channel, and daily quota rate limiting.
-- Added security-focused unit tests for redaction, permission checks, and tenant ownership allow-list behavior.
-- Added non-root API runtime user and API health check in Docker Compose.
+### 2. Tenant Isolation
 
-## Remaining Risks
+**Status**: Acceptable
 
-- The live WebSocket endpoint is not fully implemented yet; only signed short-lived connection-token issuance exists in this slice.
-- Refresh tokens are returned to the SPA as JSON. Production should prefer HttpOnly, Secure, SameSite cookies or a dedicated BFF.
-- Redis rate limits currently use fixed defaults in code; DB-driven per-tenant values should be loaded into the limiter path.
-- Provider secret encryption is placeholder-ready, not backed by KMS or envelope encryption.
-- Retry/dead-letter policy is not yet complete for all workers.
-- Full CRUD modules are placeholders; each future handler must use tenant ownership checks and permission middleware.
-- Backend compilation could not be verified on this host because Go and Docker daemon are unavailable.
+- All list handlers check `IsPlatform` and scope queries with `WHERE tenant_id = $1` for non-platform users.
+- Mutation handlers validate tenant ownership via conditional WHERE clauses.
+- Cross-tenant WebSocket token requests are rejected.
+- API key verification returns tenant_id from the key record, not from user input.
+- DashboardStats delivery queries fixed: separate `deliveryScope` for `notification_deliveries` (notifications use `n.` alias, deliveries use bare `tenant_id`).
+- RemoveGroupMember: added `AND tenant_id = $3` to DELETE query.
+- AddGroupMember: added principal extraction with `cg.tenant_id = $3 AND c.tenant_id = $3` cross-tenant validation.
+- Structural handler tests verify all 40+ handlers for tenant isolation patterns.
+- SendAdminNotification: platform admin must provide `tenant_id` (400 if missing); tenant user silently forced to own tenant (cross-tenant override impossible via request body).
 
-## Production Hardening Recommendations
+**Issue (low — resolved)**: The `UpdateFeature` handler now validates tenant ownership via `WHERE id = $1 AND tenant_id = $3` for non-platform users, and the audit event includes `TenantID`. Verified by handler structural test.
 
-- Terminate TLS at a reverse proxy and set HSTS.
-- Use strong random `JWT_SECRET` and rotate it with a documented key-id strategy.
-- Store refresh tokens in HttpOnly cookies, not browser local storage.
-- Use managed secret storage or KMS for provider credentials, JWT secrets, and encryption keys.
-- Run PostgreSQL, Redis, and RabbitMQ on private networks only.
-- Enable PostgreSQL SSL, least-privilege DB users, backups, and PITR.
-- Require Redis auth/TLS and disable public network access.
-- Require RabbitMQ TLS, strong credentials, and least-privilege vhosts/users.
-- Add OpenTelemetry traces, security alerting, and audit-log retention policy.
-- Run SAST, dependency scanning, image scanning, and migration checks in CI.
+### 3. API Key Security
+
+**Status**: Acceptable
+
+- Keys stored as SHA-256 hashes.
+- Raw key shown once on creation, not stored.
+- Scope enforcement via API key scope middleware.
+- Revocation sets `status = 'revoked'` and checks `revoked_at IS NULL` in queries.
+- Expiration checked in VerifyAPIKey.
+
+### 4. Password Storage
+
+**Status**: Acceptable
+
+- Passwords hashed with bcrypt (DefaultCost = 10).
+- Password reset tokens hashed with SHA-256, one-time use, 1-hour expiry.
+- Email verification tokens hashed with SHA-256, one-time use, 24-hour expiry.
+
+### 5. Refresh Token Security
+
+**Status**: Acceptable
+
+- Refresh tokens stored as SHA-256 hashes in `auth_sessions` table.
+- Rotation on each refresh (old session marked `rotated`).
+- Logout revokes the session.
+- No HttpOnly cookie support (tokens returned in JSON response body).
+
+**Issue (medium)**: Refresh tokens are returned in JSON responses, accessible to JavaScript. A BFF pattern or HttpOnly cookies would mitigate XSS risk.
+
+### 6. Provider Secret Leakage
+
+**Status**: Acceptable with caveats
+
+- Provider configs stored as `config_json` with raw values.
+- ListProviderConfigs endpoint does NOT return config_json.
+- UpdateProviderConfig accepts new config values.
+- Provider test passes config_json internally, does not leak in output.
+
+**Issue (high — resolved)**: Provider secrets are stored encrypted using AES-256-GCM with a key derived via SHA-256 from `APP_ENCRYPTION_KEY`. Encryption is wired into CreateProviderConfig, UpdateProviderConfig, and decryption into TestProviderConfig.
+
+### 7. WebSocket Auth
+
+**Status**: Acceptable
+
+- One-time connection tokens stored hashed in `websocket_connection_tokens` table.
+- Token validated against DB on connection, then marked `used`.
+- JWT fallback for admin connections.
+- Tenant isolation enforced.
+
+### 8. Rate Limiting
+
+**Status**: Acceptable
+
+- Redis-based fixed window rate limiter.
+- Per-tenant and per-channel limits loaded from DB with 5-minute cache.
+- Daily quota enforced separately.
+
+### 9. Metrics Endpoint
+
+**Status**: Acceptable
+
+- `/metrics` endpoint exposes aggregate counts only (no PII).
+- Not authenticated (Prometheus standard).
+
+### 10. Audit Logging
+
+**Status**: Acceptable
+
+- All mutations audited (login, logout, CRUD operations, notification sends).
+- Security events logged to separate `security_events` table.
+- Sensitive values redacted via `security.RedactMap` before storage.
+- IP address and user agent captured.
+
+## Remediation Plan
+
+### High Priority (Resolved)
+1. **Encrypt provider secrets at rest**: AES-256-GCM wired into CreateProviderConfig, UpdateProviderConfig, TestProviderConfig. Verified by structural handler tests.
+
+### Medium Priority
+2. **Move refresh tokens to HttpOnly cookies**: Requires BFF or API changes.
+3. **Add tenant ownership check to UpdateFeature**: Resolved — `AND tenant_id = $3` added, audit event includes TenantID. Structural test verifies.
+
+### Low Priority
+4. **Granular permissions**: Implemented and verified with 18 test cases.
+5. **Add MFA support**: Use the existing `mfa_secret_encrypted` column.

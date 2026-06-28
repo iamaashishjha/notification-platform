@@ -17,6 +17,11 @@ coverage.html
 tmp/
 logs/
 
+# Backups
+backups/
+*.dump
+*.sql.gz
+
 # IDE/editor
 .idea/
 .vscode/

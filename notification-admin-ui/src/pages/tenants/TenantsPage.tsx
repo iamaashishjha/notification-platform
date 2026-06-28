@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { useAuth } from '../../auth/AuthContext';
 
 type Tenant = { id: string; name: string; slug: string; status: string; created_at: string };
 
 export function TenantsPage() {
+  const { can } = useAuth();
+  if (!can('tenants.view')) return <Navigate to="/" replace />;
   const [items, setItems] = useState<Tenant[]>([]);
   const [error, setError] = useState('');
   useEffect(() => {

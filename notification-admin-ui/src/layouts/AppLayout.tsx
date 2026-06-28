@@ -7,17 +7,17 @@ const nav = [
   { to: '/tenants', label: 'Tenants', icon: Building2, permission: 'tenants.view' },
   { to: '/users', label: 'Users', icon: Users, permission: 'users.view' },
   { to: '/roles', label: 'Roles', icon: Shield, permission: 'roles.manage' },
-  { to: '/features', label: 'Features', icon: UserRoundCog, permission: 'features.manage' },
-  { to: '/channels', label: 'Channels', icon: Bell, permission: 'channels.manage' },
-  { to: '/providers', label: 'Providers', icon: Settings, permission: 'providers.manage' },
+  { to: '/features', label: 'Features', icon: UserRoundCog, permission: 'features.view' },
+  { to: '/channels', label: 'Channels', icon: Bell, permission: 'channels.view' },
+  { to: '/providers', label: 'Providers', icon: Settings, permission: 'providers.view' },
   { to: '/contacts', label: 'Contacts', icon: Users, permission: 'contacts.view' },
   { to: '/templates', label: 'Templates', icon: Megaphone, permission: 'templates.view' },
   { to: '/notifications', label: 'Logs', icon: Bell, permission: 'notifications.view' },
   { to: '/notifications/send', label: 'Send', icon: Send, permission: 'notifications.send' },
   { to: '/campaigns', label: 'Campaigns', icon: Megaphone, permission: 'campaigns.view' },
-  { to: '/api-keys', label: 'API Keys', icon: KeyRound, permission: 'api_keys.manage' },
+  { to: '/api-keys', label: 'API Keys', icon: KeyRound, permission: 'api_keys.view' },
   { to: '/audit-logs', label: 'Audit', icon: Shield, permission: 'audit_logs.view' },
-  { to: '/settings', label: 'Settings', icon: Settings, permission: 'settings.manage' }
+  { to: '/settings', label: 'Settings', icon: Settings, permission: 'settings.view' }
 ];
 
 export function AppLayout() {

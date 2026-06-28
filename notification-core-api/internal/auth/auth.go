@@ -171,11 +171,67 @@ ORDER BY key`
 	return perms, rows.Err()
 }
 
+var granularToBroad = map[string]string{
+	"users.view":               "users.manage",
+	"users.create":             "users.manage",
+	"users.update":             "users.manage",
+	"users.delete":             "users.manage",
+	"users.reset_password":     "users.manage",
+	"users.assign_roles":       "users.manage",
+	"users.assign_permissions": "users.manage",
+	"features.view":            "features.manage",
+	"features.update":          "features.manage",
+	"channels.view":            "channels.manage",
+	"channels.update":          "channels.manage",
+	"providers.view":           "providers.manage",
+	"providers.create":         "providers.manage",
+	"providers.update":         "providers.manage",
+	"providers.delete":         "providers.manage",
+	"providers.test":           "providers.manage",
+	"groups.view":              "groups.manage",
+	"groups.create":            "groups.manage",
+	"groups.update":            "groups.manage",
+	"groups.delete":            "groups.manage",
+	"groups.members.manage":    "groups.manage",
+	"settings.view":            "settings.manage",
+	"settings.update":          "settings.manage",
+	"api_keys.view":            "api_keys.manage",
+	"api_keys.create":          "api_keys.manage",
+	"api_keys.revoke":          "api_keys.manage",
+	"campaigns.view":           "campaigns.manage",
+	"campaigns.create":         "campaigns.manage",
+	"campaigns.update":         "campaigns.manage",
+	"campaigns.approve":        "campaigns.manage",
+	"campaigns.send":           "campaigns.manage",
+	"campaigns.schedule":       "campaigns.manage",
+	"campaigns.cancel":         "campaigns.manage",
+	"templates.view":           "templates.manage",
+	"templates.create":         "templates.manage",
+	"templates.update":         "templates.manage",
+	"templates.delete":         "templates.manage",
+	"contacts.view":            "contacts.manage",
+	"contacts.create":          "contacts.manage",
+	"contacts.update":          "contacts.manage",
+	"contacts.delete":          "contacts.manage",
+	"notifications.view":       "notifications.manage",
+	"notifications.create":     "notifications.manage",
+	"notifications.send":       "notifications.manage",
+	"notifications.bulk_send":  "notifications.manage",
+	"notifications.retry":      "notifications.manage",
+	"notifications.cancel":     "notifications.manage",
+}
+
 func (s Service) HasPermission(ctx context.Context, p Principal, permission string) bool {
 	if p.IsPlatform {
 		return true
 	}
-	return slices.Contains(p.Permissions, permission)
+	if slices.Contains(p.Permissions, permission) {
+		return true
+	}
+	if broad, ok := granularToBroad[permission]; ok {
+		return slices.Contains(p.Permissions, broad)
+	}
+	return false
 }
 
 func (s Service) InvalidatePermissionCache(ctx context.Context, userID, tenantID string) error {

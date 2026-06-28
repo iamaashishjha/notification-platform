@@ -9,6 +9,12 @@
 # Local runner state
 .runtime/
 
+# Backups
+backups/
+*.dump
+*.sql.gz
+.runtime/logs/
+
 # Common build output
 node_modules/
 dist/

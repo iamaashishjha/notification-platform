@@ -107,6 +107,102 @@ start_background() {
   ok "$name started (PID $pid)."
 }
 
+seed_tenants() {
+  check_docker
+  info "Running database migrations first"
+  (cd "$ROOT_DIR" && docker compose --profile api run --rm migrate)
+
+  local choice slug slugs
+  cat <<'EOF'
+
+Seed options
+1. Fresh start (platform admin only, no sample tenants)
+2. Seed one sample tenant (choose from 14 industries)
+3. Seed all sample tenants (ecommerce + 14 industry tenants)
+4. Load local_seed.sql (ecommerce sample tenant only)
+EOF
+  read -r -p "Choose [4]: " choice
+  choice="${choice:-4}"
+
+  case "$choice" in
+    1)
+      info "Seeding platform admin user and permissions only"
+      (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+      info "Clearing all tenant data for fresh start..."
+      docker compose --profile api run --rm -T postgres psql -U notification -d notification <<'SQL'
+DELETE FROM contact_group_members;
+DELETE FROM contact_groups;
+DELETE FROM contacts;
+DELETE FROM notification_templates;
+DELETE FROM tenant_api_keys;
+DELETE FROM tenant_provider_configs;
+DELETE FROM tenant_channels;
+DELETE FROM tenant_features;
+DELETE FROM user_roles WHERE tenant_id IS NOT NULL;
+DELETE FROM tenant_users;
+DELETE FROM notifications;
+DELETE FROM notification_deliveries;
+DELETE FROM in_app_notifications;
+DELETE FROM websocket_sessions;
+DELETE FROM campaigns;
+DELETE FROM campaign_recipients;
+DELETE FROM scheduled_jobs;
+DELETE FROM tenants;
+SQL
+      ok "Fresh start ready — platform admin only (admin@example.com / password)."
+      ;;
+    2|3)
+      slugs=("fintech" "hrms" "healthcare" "logistics" "edtech" "realestate" "travel" "food" "banking" "insurance" "social" "gaming" "iot" "saas")
+      if [[ "$choice" == 2 ]]; then
+        info "Which sample tenant to seed?"
+        cat <<'TENANTS'
+1. fintech        - Fintech Payments
+2. hrms           - HRMS Portal
+3. healthcare     - Healthcare App
+4. logistics      - Logistics Platform
+5. edtech         - EdTech Platform
+6. realestate     - Real Estate Marketplace
+7. travel         - Travel Booking
+8. food           - Food Delivery
+9. banking        - Banking Portal
+10. insurance     - Insurance Platform
+11. social        - Social Network
+12. gaming        - Gaming Platform
+13. iot           - IoT Dashboard
+14. saas          - SaaS Metrics
+TENANTS
+        read -r -p "Enter number (1-14): " slug
+        case "$slug" in
+          1|2|3|4|5|6|7|8|9|10|11|12|13|14) idx=$((slug - 1)); slug="${slugs[$idx]}" ;;
+          *) die "Invalid choice." ;;
+        esac
+      else
+        slug="all"
+      fi
+
+      info "Seeding base (ecommerce + admin users)..."
+      (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+
+      info "Seeding sample tenants..."
+      local seed_volume="$ROOT_DIR/notification-core-api/seeds:/seeds:ro"
+      if [[ "$slug" == "all" ]]; then
+        docker compose --profile api run --rm -T -v "$seed_volume" postgres psql -h postgres -U notification -d notification -f /seeds/sample_tenants.sql
+        ok "All 14 industry sample tenants seeded."
+      else
+        # Seed only the chosen tenant by running sample_tenants.sql then cleaning others
+        docker compose --profile api run --rm -T -v "$seed_volume" postgres psql -h postgres -U notification -d notification -f /seeds/sample_tenants.sql
+        docker compose --profile api run --rm -T postgres psql -U notification -d notification \
+          -c "DELETE FROM tenants WHERE slug NOT IN ('ecommerce','$slug');"
+        ok "Seeded tenant: $slug."
+      fi
+      ;;
+    4)
+      (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+      ok "Local seed complete. Ecommerce tenant ready."
+      ;;
+  esac
+}
+
 run_migrations_and_seed() {
   check_docker
   info "Running database migrations"
@@ -303,7 +399,7 @@ start_worker() {
 
 start_all_workers() {
   local worker
-  for worker in router scheduler email sms fcm websocket; do start_worker "$worker"; done
+  for worker in router scheduler email sms fcm websocket retry dead; do start_worker "$worker"; done
 }
 
 start_admin() {
@@ -350,11 +446,11 @@ backend_only() {
 
 workers_only() {
   local choice worker
-  read -r -p "Worker (router/scheduler/email/sms/fcm/websocket/all) [all]: " choice
+  read -r -p "Worker (router/scheduler/email/sms/fcm/websocket/retry/dead/all) [all]: " choice
   choice="${choice:-all}"
   case "$choice" in
     all) start_all_workers ;;
-    router|scheduler|email|sms|fcm|websocket) start_worker "$choice" ;;
+    router|scheduler|email|sms|fcm|websocket|retry|dead) start_worker "$choice" ;;
     *) die "Unknown worker: $choice" ;;
   esac
   printf 'Worker logs: %s | Stop: ./stop.sh\n' "$LOG_DIR"
@@ -364,16 +460,17 @@ show_menu() {
   cat <<'EOF'
 
 Notification Platform local runner
-1. Run everything with Docker Compose
-2. Run infrastructure with Docker, but Go backend and React UI using system tools
-3. Run only infrastructure services
-4. Run only Go backend locally
-5. Run only React admin UI locally
-6. Run workers locally
-7. Configure notification providers
-8. Run local smoke tests
-9. Stop all services
-10. Exit
+1.  Run everything with Docker Compose
+2.  Run infrastructure with Docker, but Go backend and React UI using system tools
+3.  Run only infrastructure services
+4.  Run only Go backend locally
+5.  Run only React admin UI locally
+6.  Run workers locally
+7.  Configure notification providers
+8.  Seed menu (fresh start / sample tenants / local seed)
+9.  Run local smoke tests
+10. Stop all services
+11. Exit
 
 Queue note: RabbitMQ is the implemented default. Kafka is a future/advanced placeholder.
 EOF
@@ -391,10 +488,11 @@ main() {
     5) start_admin ;;
     6) workers_only ;;
     7) configure_providers ;;
-    8) "$ROOT_DIR/test-local.sh" ;;
-    9) "$ROOT_DIR/stop.sh" ;;
-    10) exit 0 ;;
-    *) die "Choose a number from 1 to 10." ;;
+    8) seed_tenants ;;
+    9) "$ROOT_DIR/test-local.sh" ;;
+    10) "$ROOT_DIR/stop.sh" ;;
+    11) exit 0 ;;
+    *) die "Choose a number from 1 to 11." ;;
   esac
 }
 

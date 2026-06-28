@@ -13,7 +13,7 @@ api:
 	docker compose --profile api up -d --build notification-api
 
 workers:
-	docker compose --profile workers up -d --build worker-router worker-scheduler worker-email worker-sms worker-fcm worker-websocket
+	docker compose --profile workers up -d --build worker-router worker-scheduler worker-email worker-sms worker-fcm worker-websocket worker-retry worker-dead
 
 admin:
 	docker compose --profile admin up -d --build notification-admin-ui

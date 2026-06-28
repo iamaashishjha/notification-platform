@@ -58,13 +58,15 @@ type Service struct {
 }
 
 func NewService(db *pgxpool.Pool, q *queue.Client, log *zap.Logger, cfg config.Config) Service {
+	rl := ratelimit.NewService(cfg.RedisAddr)
+	rl.SetDB(db)
 	return Service{
 		db:        db,
 		queue:     q,
 		tenant:    tenant.NewService(db),
 		features:  features.NewService(db),
 		channels:  channels.NewService(db),
-		ratelimit: ratelimit.NewService(cfg.RedisAddr),
+		ratelimit: rl,
 		log:       log,
 	}
 }

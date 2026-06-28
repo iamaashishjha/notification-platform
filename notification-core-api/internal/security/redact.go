@@ -1,6 +1,8 @@
 package security
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -8,7 +10,71 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 )
+
+var (
+	encKey     []byte
+	encKeyOnce sync.Once
+)
+
+func SetEncryptionKey(key string) {
+	encKeyOnce.Do(func() {
+		h := sha256.Sum256([]byte(key))
+		encKey = h[:]
+	})
+}
+
+func Encrypt(plain string) (string, error) {
+	if plain == "" {
+		return "", nil
+	}
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return "", err
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, aesGCM.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	ciphertext := aesGCM.Seal(nonce, nonce, []byte(plain), nil)
+	return "enc:v1:" + base64.RawURLEncoding.EncodeToString(ciphertext), nil
+}
+
+func Decrypt(ciphertext string) (string, error) {
+	if ciphertext == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(ciphertext, "enc:v1:") {
+		return ciphertext, nil
+	}
+	block, err := aes.NewCipher(encKey)
+	if err != nil {
+		return "", err
+	}
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(ciphertext, "enc:v1:"))
+	if err != nil {
+		return "", nil
+	}
+	nonceSize := aesGCM.NonceSize()
+	if len(raw) < nonceSize {
+		return "", errors.New("ciphertext too short")
+	}
+	nonce, rawCipher := raw[:nonceSize], raw[nonceSize:]
+	plain, err := aesGCM.Open(nil, nonce, rawCipher, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
 
 var secretKeys = []string{"secret", "token", "password", "api_key", "apikey", "authorization", "private_key"}
 
@@ -90,22 +156,19 @@ func MaskToken(token string) string {
 }
 
 func EncryptPlaceholder(plain string) string {
-	if plain == "" {
-		return ""
-	}
-	return "enc:v1:local-placeholder:" + base64.RawURLEncoding.EncodeToString([]byte(plain))
-}
-
-func DecryptPlaceholder(ciphertext string) string {
-	const prefix = "enc:v1:local-placeholder:"
-	if !strings.HasPrefix(ciphertext, prefix) {
-		return ciphertext
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(ciphertext, prefix))
+	s, err := Encrypt(plain)
 	if err != nil {
 		return ""
 	}
-	return string(raw)
+	return s
+}
+
+func DecryptPlaceholder(ciphertext string) string {
+	s, err := Decrypt(ciphertext)
+	if err != nil {
+		return ""
+	}
+	return s
 }
 
 func containsSecretKey(key string) bool {

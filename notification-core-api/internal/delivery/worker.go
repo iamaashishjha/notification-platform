@@ -41,7 +41,11 @@ func (w Worker) Run(ctx context.Context, queueName string) error {
 			}
 			if err := w.handle(ctx, job); err != nil {
 				w.log.Error("delivery failed", zap.Error(err), zap.String("delivery_id", job.DeliveryID), zap.String("channel", job.Channel))
-				_ = msg.Nack(false, false)
+				job.Attempt++
+				if pubErr := w.queue.Publish(ctx, queue.RetryQueue, job); pubErr != nil {
+					w.log.Error("retry publish failed", zap.Error(pubErr), zap.String("delivery_id", job.DeliveryID))
+				}
+				_ = msg.Ack(false)
 				continue
 			}
 			_ = msg.Ack(false)

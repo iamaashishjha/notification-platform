@@ -143,7 +143,7 @@ tenant@example.com / password
 Demo tenant:
 
 ```text
-demo-ride
+ecommerce
 ```
 
 Local tenant API key:

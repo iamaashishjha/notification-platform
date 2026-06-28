@@ -80,7 +80,7 @@ Store the service-account JSON outside the repository. The path is consumed by t
 3. Load credentials from backend environment or a production secret manager.
 4. Store only redacted response metadata in delivery logs.
 
-The local seed maps every demo-tenant channel to `mock`. Changing environment values alone must not silently override tenant policy.
+The local seed maps the e-commerce sample tenant's channels to `mock`. Changing environment values alone must not silently override tenant policy.
 
 ## Security rules
 
@@ -89,4 +89,5 @@ The local seed maps every demo-tenant channel to `mock`. Changing environment va
 - Use the interactive runner's hidden prompts for tokens and passwords.
 - Use a secret manager or mounted secrets in production, not checked-in environment files.
 - Rotate any credential that was printed, logged, or committed accidentally.
+- Provider secrets stored in `tenant_provider_configs.config_json` are encrypted at rest with AES-256-GCM using `APP_ENCRYPTION_KEY`. The encrypted blob is decrypted transparently during provider test operations.
 

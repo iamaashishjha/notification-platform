@@ -52,7 +52,7 @@ Seed credentials:
 
 - Platform admin: `admin@example.com` / `password`
 - Tenant user: `tenant@example.com` / `password`
-- Tenant API key: `demo_tenant_api_key_local`
+- Tenant API key: `demo_tenant_api_key_local` (for the e-commerce sample tenant)
 
 Mock providers are the safe local default. Provider credentials belong only in ignored backend files, never in the frontend or committed examples. The current worker implementations deliver through mock adapters; email/SMS/FCM real-provider values can be prepared locally for future adapters but are not sent to those services yet.
 
@@ -68,7 +68,13 @@ make migrate-up
 make seed
 ```
 
-Demo tenant slug: `demo-ride`.
+The seed menu (`./run.sh` option 8) provides:
+1. Fresh start — platform admin only, no sample tenants
+2. Seed one sample tenant — choose from 14 industries (fintech, hrms, healthcare, etc.)
+3. Seed all sample tenants
+4. Local seed — e-commerce tenant with templates, contacts, and API key
+
+Sample tenant slug: `ecommerce`.
 
 Raw API keys are stored only as hashes. The seed prints the local key once for testing.
 
@@ -79,22 +85,22 @@ curl -X POST http://localhost:8080/api/v1/notifications \
   -H "Authorization: Bearer demo_tenant_api_key_local" \
   -H "Content-Type: application/json" \
   -d '{
-    "event": "ride.accepted",
-    "channels": ["sms", "fcm"],
-    "template": "ride_accepted",
+    "event": "order.confirmed",
+    "channels": ["sms", "email"],
+    "template": "order_confirmation",
     "target": {
       "type": "single",
       "recipient": {
-        "phone": "9840000000",
-        "email": "user@example.com",
+        "phone": "+12025551234",
+        "email": "jane@example.com",
         "fcm_token": "device_token",
-        "external_user_id": "user_123"
+        "external_user_id": "cust_001"
       }
     },
     "data": {
-      "customer_name": "Aashish",
-      "driver_name": "Ram",
-      "vehicle_no": "BA 2 PA 1234"
+      "customer_name": "Jane Smith",
+      "order_id": "ORD-12345",
+      "total_amount": "99.99"
     },
     "priority": 5,
     "schedule": { "type": "instant" }
@@ -105,13 +111,13 @@ curl -X POST http://localhost:8080/api/v1/notifications \
 
 ```json
 {
-  "event": "ride.accepted",
+  "event": "order.confirmed",
   "channels": ["sms"],
-  "template": "ride_accepted",
-  "target": { "type": "single", "recipient": { "phone": "9840000000" } },
-  "data": { "customer_name": "Aashish" },
+  "template": "order_confirmation",
+  "target": { "type": "single", "recipient": { "phone": "+12025551234" } },
+  "data": { "customer_name": "Jane Smith", "order_id": "ORD-12345" },
   "priority": 5,
-  "schedule": { "type": "scheduled", "send_at": "2026-06-26T10:00:00+05:45" }
+  "schedule": { "type": "scheduled", "send_at": "2026-06-28T10:00:00Z" }
 }
 ```
 
@@ -140,7 +146,24 @@ Every major table includes `tenant_id` where applicable, and query code avoids `
 
 The backend uses structured logs and central redaction helpers for secrets, API keys, JWTs, provider tokens, emails, phone numbers, and config secret fields. Audit logs capture login, tenant, API key, provider, RBAC, template, campaign, manual send, retry, and cancellation actions as the implementation expands.
 
-Passwords are bcrypt hashes. API keys are SHA-256 hashes. Provider secret encryption helpers are intentionally placeholder-ready for plugging in KMS or envelope encryption.
+Every HTTP request is logged with request_id, method, path, status, duration_ms, tenant_id, actor_id, and remote_ip. A panic recovery middleware catches panics, logs stack traces, and returns 500.
+
+Passwords are bcrypt hashes. API keys are SHA-256 hashes. Provider secrets are encrypted at rest with AES-256-GCM using `APP_ENCRYPTION_KEY`. The encrypted config is decrypted transparently during provider test operations.
+
+## Observability
+
+Prometheus-format metrics at `GET /metrics` (27+ metrics): notification counters, queue stats, worker stats, provider send/fail rates (by channel), WebSocket stats, panic counter, HTTP request rate and latency histogram. See `docs/observability.md` for Prometheus scrape config, Grafana panel recommendations, and critical alerts.
+
+## Granular Permissions
+
+Broad "manage" permissions (e.g. `users.manage`, `providers.manage`) are split into granular view/create/update/delete/test/revoke permissions. Backward compatibility is maintained: users holding a broad permission automatically satisfy all corresponding granular permission checks. Action buttons in the frontend are gated by the specific granular permission required.
+
+## Backup and Restore
+
+Scripts under `notification-core-api/scripts/`:
+- `backup-postgres.sh` - gzip-compressed timestamped dump to `backups/`
+- `restore-postgres.sh` - restore with confirmation prompt
+- `prune-old-logs.sh` - remove log files older than `LOG_RETENTION_DAYS` (default 30)
 
 ## Deployment Profiles
 

@@ -8,7 +8,19 @@ import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { TenantsPage } from '../pages/tenants/TenantsPage';
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 import { SendNotificationPage } from '../pages/notifications/SendNotificationPage';
-import { ModulePage } from '../pages/settings/ModulePage';
+import { ContactsPage } from '../pages/contacts/ContactsPage';
+import { TemplatesPage } from '../pages/templates/TemplatesPage';
+import { CampaignsPage } from '../pages/campaigns/CampaignsPage';
+import { RolesPage } from '../pages/roles/RolesPage';
+import { PermissionsPage } from '../pages/permissions/PermissionsPage';
+import { ApiKeysPage } from '../pages/api-keys/ApiKeysPage';
+import { AuditLogsPage } from '../pages/audit-logs/AuditLogsPage';
+import { UsersPage } from '../pages/users/UsersPage';
+import { FeaturesPage } from '../pages/features/FeaturesPage';
+import { ChannelsPage } from '../pages/channels/ChannelsPage';
+import { ProvidersPage } from '../pages/providers/ProvidersPage';
+import { GroupsPage } from '../pages/groups/GroupsPage';
+import { SettingsPage } from '../pages/settings/SettingsPage';
 import './styles.css';
 
 function PrivateRoute() {
@@ -28,19 +40,19 @@ function App() {
             <Route path="/tenants" element={<TenantsPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/notifications/send" element={<SendNotificationPage />} />
-            <Route path="/users" element={<ModulePage title="Users" permission="users.view" />} />
-            <Route path="/roles" element={<ModulePage title="Roles" permission="roles.manage" />} />
-            <Route path="/permissions" element={<ModulePage title="Permissions" permission="permissions.manage" />} />
-            <Route path="/features" element={<ModulePage title="Feature Flags" permission="features.manage" />} />
-            <Route path="/channels" element={<ModulePage title="Channels" permission="channels.manage" />} />
-            <Route path="/providers" element={<ModulePage title="Provider Configs" permission="providers.manage" />} />
-            <Route path="/contacts" element={<ModulePage title="Contacts" permission="contacts.view" />} />
-            <Route path="/groups" element={<ModulePage title="Contact Groups" permission="groups.manage" />} />
-            <Route path="/templates" element={<ModulePage title="Templates" permission="templates.view" />} />
-            <Route path="/campaigns" element={<ModulePage title="Campaigns" permission="campaigns.view" />} />
-            <Route path="/api-keys" element={<ModulePage title="API Keys" permission="api_keys.manage" />} />
-            <Route path="/audit-logs" element={<ModulePage title="Audit Logs" permission="audit_logs.view" />} />
-            <Route path="/settings" element={<ModulePage title="Settings" permission="settings.manage" />} />
+            <Route path="/users" element={<UsersPage />} />
+            <Route path="/contacts" element={<ContactsPage />} />
+            <Route path="/templates" element={<TemplatesPage />} />
+            <Route path="/campaigns" element={<CampaignsPage />} />
+            <Route path="/roles" element={<RolesPage />} />
+            <Route path="/permissions" element={<PermissionsPage />} />
+            <Route path="/api-keys" element={<ApiKeysPage />} />
+            <Route path="/audit-logs" element={<AuditLogsPage />} />
+            <Route path="/groups" element={<GroupsPage />} />
+            <Route path="/features" element={<FeaturesPage />} />
+            <Route path="/channels" element={<ChannelsPage />} />
+            <Route path="/providers" element={<ProvidersPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Routes>
       </AuthProvider>

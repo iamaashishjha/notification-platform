@@ -1,6 +1,6 @@
 WITH demo_tenant AS (
     INSERT INTO tenants (name, slug, status)
-    VALUES ('Demo Ride App', 'demo-ride', 'active')
+    VALUES ('E-Commerce Store', 'ecommerce', 'active')
     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, status = EXCLUDED.status
     RETURNING id
 ),
@@ -25,15 +25,38 @@ tenant_membership AS (
 perms AS (
     INSERT INTO permissions (key, description)
     SELECT key, key FROM (VALUES
+        -- Tenants
         ('tenants.view'), ('tenants.create'), ('tenants.update'), ('tenants.delete'),
+        -- Users (broad + granular)
         ('users.view'), ('users.create'), ('users.update'), ('users.delete'),
-        ('roles.manage'), ('permissions.manage'), ('features.manage'), ('channels.manage'),
-        ('providers.manage'), ('api_keys.manage'), ('contacts.view'), ('contacts.manage'),
-        ('groups.manage'), ('templates.view'), ('templates.manage'), ('notifications.view'),
+        ('users.manage'), ('users.reset_password'), ('users.assign_roles'), ('users.assign_permissions'),
+        -- Roles & permissions
+        ('roles.manage'), ('permissions.manage'),
+        -- Features (broad + granular)
+        ('features.manage'), ('features.view'), ('features.update'),
+        -- Channels (broad + granular)
+        ('channels.manage'), ('channels.view'), ('channels.update'),
+        -- Providers (broad + granular)
+        ('providers.manage'), ('providers.view'), ('providers.create'), ('providers.update'), ('providers.delete'), ('providers.test'),
+        -- API keys (broad + granular)
+        ('api_keys.manage'), ('api_keys.view'), ('api_keys.create'), ('api_keys.revoke'),
+        -- Contacts (broad + granular)
+        ('contacts.view'), ('contacts.manage'), ('contacts.create'), ('contacts.update'), ('contacts.delete'),
+        -- Groups (broad + granular)
+        ('groups.manage'), ('groups.view'), ('groups.create'), ('groups.update'), ('groups.delete'), ('groups.members.manage'),
+        -- Templates (broad + granular)
+        ('templates.view'), ('templates.manage'), ('templates.create'), ('templates.update'), ('templates.delete'),
+        -- Notifications (broad + granular)
+        ('notifications.view'), ('notifications.manage'),
         ('notifications.create'), ('notifications.send'), ('notifications.bulk_send'),
-        ('notifications.retry'), ('notifications.cancel'), ('campaigns.view'), ('campaigns.create'),
-        ('campaigns.approve'), ('campaigns.send'), ('campaigns.schedule'), ('campaigns.cancel'),
-        ('audit_logs.view'), ('settings.manage')
+        ('notifications.retry'), ('notifications.cancel'),
+        -- Campaigns (broad + granular)
+        ('campaigns.view'), ('campaigns.manage'), ('campaigns.create'),
+        ('campaigns.update'), ('campaigns.approve'), ('campaigns.send'), ('campaigns.schedule'), ('campaigns.cancel'),
+        -- Audit
+        ('audit_logs.view'),
+        -- Settings (broad + granular)
+        ('settings.manage'), ('settings.view'), ('settings.update')
     ) AS p(key)
     ON CONFLICT (key) DO NOTHING
     RETURNING id
@@ -65,7 +88,7 @@ SELECT t.id, u.id, r.id
 FROM tenants t
 JOIN users u ON u.email = 'tenant@example.com'
 JOIN roles r ON r.tenant_id = t.id AND r.key = 'tenant_admin'
-WHERE t.slug = 'demo-ride'
+WHERE t.slug = 'ecommerce'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO tenant_features (tenant_id, feature_key, enabled, config_json)
@@ -78,45 +101,45 @@ CROSS JOIN (VALUES
     ('bulk_import.enabled'), ('admin_send.enabled'), ('api_access.enabled'),
     ('approval_flow.enabled'), ('websocket.enabled'), ('in_app.enabled')
 ) AS f(key)
-WHERE t.slug = 'demo-ride'
+WHERE t.slug = 'ecommerce'
 ON CONFLICT (tenant_id, feature_key) DO UPDATE SET enabled = EXCLUDED.enabled;
 
 INSERT INTO tenant_channels (tenant_id, channel, enabled, direction, rate_limit_per_second, daily_quota, priority, config_json)
 SELECT t.id, c.channel, true, c.direction, 20, 50000, 5, '{}'::jsonb
 FROM tenants t
 CROSS JOIN (VALUES ('sms', 'one_way'), ('email', 'one_way'), ('fcm', 'one_way'), ('websocket', 'two_way')) AS c(channel, direction)
-WHERE t.slug = 'demo-ride'
+WHERE t.slug = 'ecommerce'
 ON CONFLICT (tenant_id, channel) DO UPDATE SET enabled = true, direction = EXCLUDED.direction;
 
 INSERT INTO tenant_provider_configs (tenant_id, channel, provider, config_json, is_default, status)
 SELECT t.id, c.channel, 'mock', '{"secret":"[local-placeholder]"}'::jsonb, true, 'active'
 FROM tenants t
 CROSS JOIN (VALUES ('sms'), ('email'), ('fcm'), ('websocket')) AS c(channel)
-WHERE t.slug = 'demo-ride'
+WHERE t.slug = 'ecommerce'
 ON CONFLICT (tenant_id, channel) WHERE is_default = true AND status = 'active'
 DO UPDATE SET provider = EXCLUDED.provider, config_json = EXCLUDED.config_json;
 
 INSERT INTO tenant_api_keys (tenant_id, name, key_hash, scopes_json, status)
 SELECT id, 'Local Demo API Key', '616362fb0756eb262a86640207b2e674c6842e8d20b69fe92850ca0cfe5c187c', '["notifications:create", "devices:write", "in_app:read"]'::jsonb, 'active'
-FROM tenants WHERE slug = 'demo-ride'
+FROM tenants WHERE slug = 'ecommerce'
 ON CONFLICT (key_hash) DO UPDATE SET status = 'active', scopes_json = EXCLUDED.scopes_json;
 
 INSERT INTO notification_templates (tenant_id, template_key, channel, subject, body, status)
-SELECT id, 'ride_accepted', 'sms', NULL, 'Hi {{customer_name}}, {{driver_name}} accepted your ride in {{vehicle_no}}.', 'active' FROM tenants WHERE slug = 'demo-ride'
+SELECT id, 'order_confirmation', 'sms', NULL, 'Hi {{customer_name}}, your order #{{order_id}} of ${{total_amount}} is confirmed. Thank you for shopping with us!', 'active' FROM tenants WHERE slug = 'ecommerce'
 UNION ALL
-SELECT id, 'ride_accepted', 'fcm', 'Ride accepted', '{{driver_name}} accepted your ride.', 'active' FROM tenants WHERE slug = 'demo-ride'
+SELECT id, 'order_confirmation', 'email', 'Order Confirmed', 'Dear {{customer_name}},\n\nYour order #{{order_id}} for ${{total_amount}} has been confirmed.\n\nThank you for your purchase!', 'active' FROM tenants WHERE slug = 'ecommerce'
 UNION ALL
-SELECT id, 'welcome', 'email', 'Welcome', 'Welcome {{customer_name}} to Demo Ride App.', 'active' FROM tenants WHERE slug = 'demo-ride'
+SELECT id, 'welcome', 'email', 'Welcome', 'Welcome {{customer_name}} to E-Commerce Store!', 'active' FROM tenants WHERE slug = 'ecommerce'
 ON CONFLICT (tenant_id, template_key, channel, locale) DO UPDATE SET body = EXCLUDED.body, subject = EXCLUDED.subject;
 
 WITH c AS (
     INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
-    SELECT id, 'user_123', 'Aashish', 'user@example.com', '9840000000', 'active' FROM tenants WHERE slug = 'demo-ride'
+    SELECT id, 'cust_001', 'Jane Smith', 'jane@example.com', '+12025551234', 'active' FROM tenants WHERE slug = 'ecommerce'
     RETURNING id, tenant_id
 ),
 g AS (
     INSERT INTO contact_groups (tenant_id, name, description, status)
-    SELECT id, 'Demo Riders', 'Local testing contacts', 'active' FROM tenants WHERE slug = 'demo-ride'
+    SELECT id, 'Customers', 'Local testing contacts', 'active' FROM tenants WHERE slug = 'ecommerce'
     RETURNING id, tenant_id
 )
 INSERT INTO contact_group_members (tenant_id, group_id, contact_id)

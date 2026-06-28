@@ -17,6 +17,7 @@ import (
 	"notification-core-api/internal/providers/sms"
 	wsprovider "notification-core-api/internal/providers/websocket"
 	"notification-core-api/internal/queue"
+	"notification-core-api/internal/retry"
 
 	"go.uber.org/zap"
 )
@@ -48,6 +49,50 @@ func RunChannel(channel string, queueName string) {
 	}
 	if err := delivery.NewWorker(db, q, provider, log).Run(ctx, queueName); err != nil && ctx.Err() == nil {
 		log.Fatal("worker stopped", zap.Error(err))
+	}
+}
+
+func RunRetry() {
+	cfg := config.Load()
+	log := logger.New(cfg)
+	defer log.Sync()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	db, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal("database connect failed", zap.Error(err))
+	}
+	defer db.Close()
+	q, err := queue.Connect(cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatal("rabbitmq connect failed", zap.Error(err))
+	}
+	defer q.Close()
+	svc := retry.NewService(db, q, log, cfg)
+	if err := svc.RetryLoop(ctx); err != nil && ctx.Err() == nil {
+		log.Fatal("retry worker stopped", zap.Error(err))
+	}
+}
+
+func RunDeadLetter() {
+	cfg := config.Load()
+	log := logger.New(cfg)
+	defer log.Sync()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	db, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal("database connect failed", zap.Error(err))
+	}
+	defer db.Close()
+	q, err := queue.Connect(cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatal("rabbitmq connect failed", zap.Error(err))
+	}
+	defer q.Close()
+	svc := retry.NewService(db, q, log, cfg)
+	if err := svc.RetryDeadLetters(ctx); err != nil && ctx.Err() == nil {
+		log.Fatal("dead-letter worker stopped", zap.Error(err))
 	}
 }
 

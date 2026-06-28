@@ -166,6 +166,24 @@ services:
     environment: *backend-environment
     depends_on: [notification-api]
 
+  worker-retry:
+    profiles: ["workers", "all"]
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-retry
+    environment: *backend-environment
+    depends_on: [notification-api]
+
+  worker-dead:
+    profiles: ["workers", "all"]
+    build:
+      context: ./notification-core-api
+      args:
+        CMD: worker-dead
+    environment: *backend-environment
+    depends_on: [notification-api]
+
   notification-admin-ui:
     profiles: ["admin", "all"]
     build:

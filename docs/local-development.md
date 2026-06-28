@@ -44,7 +44,31 @@ tail -f .runtime/logs/admin-ui.log
 - Option 5 selects a JavaScript package manager, installs missing dependencies, and runs Vite.
 - Option 6 starts one worker or all workers with `go run ./cmd/worker-<name>`.
 - Option 7 securely prepares mock or provider-specific backend configuration.
-- Option 8 runs local smoke tests.
+- Option 8 opens the seed menu: fresh start (platform admin only), seed one sample tenant (14 industries), seed all, or load local e-commerce seed.
+- Option 9 runs local smoke tests.
+
+## Sample Tenants
+
+The seed menu (option 8) provides 14 industry sample tenants with pre-configured templates:
+
+| Slug | Industry | Sample Templates |
+|---|---|---|
+| fintech | Fintech Payments | payment_received, withdrawal_processed |
+| hrms | HRMS Portal | leave_approved, payroll_processed, onboarding_welcome |
+| healthcare | Healthcare App | appointment_reminder, lab_results_ready, prescription_refill |
+| logistics | Logistics Platform | shipment_dispatched, delivery_confirmed |
+| edtech | EdTech Platform | course_enrollment, assignment_due |
+| realestate | Real Estate Marketplace | new_listing_match, showing_scheduled |
+| travel | Travel Booking | booking_confirmed, flight_reminder |
+| food | Food Delivery | order_placed, order_out_for_delivery, order_delivered |
+| banking | Banking Portal | transaction_alert, statement_ready, fraud_alert |
+| insurance | Insurance Platform | premium_due, claim_approved |
+| social | Social Network | friend_request, message_received, post_liked |
+| gaming | Gaming Platform | match_found, tournament_reminder, reward_earned |
+| iot | IoT Dashboard | device_offline, threshold_breach |
+| saas | SaaS Metrics | usage_threshold, trial_expiring, invoice_ready |
+
+Each sample tenant comes with all features enabled, mock providers, channels, and an API key derived from its slug (e.g. `sample_fintech`).
 
 The root Makefile exposes `run`, `stop`, `infra`, `api`, `workers`, `admin`, `migrate`, `seed`, `test-local`, and `logs` targets.
 

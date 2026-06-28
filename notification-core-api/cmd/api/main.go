@@ -14,8 +14,11 @@ import (
 	httpapp "notification-core-api/internal/http"
 	"notification-core-api/internal/http/handlers"
 	"notification-core-api/internal/logger"
+	"notification-core-api/internal/metrics"
 	"notification-core-api/internal/notifications"
 	"notification-core-api/internal/queue"
+	"notification-core-api/internal/security"
+	"notification-core-api/internal/websocket"
 
 	"go.uber.org/zap"
 )
@@ -39,10 +42,22 @@ func main() {
 	}
 	defer q.Close()
 
+	security.SetEncryptionKey(cfg.EncryptionKey)
+
 	authSvc := auth.NewService(db, cfg)
 	notificationSvc := notifications.NewService(db, q, log, cfg)
 	h := handlers.New(db, authSvc, notificationSvc)
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapp.NewRouter(cfg, log, h, authSvc), ReadHeaderTimeout: 5 * time.Second}
+	h.SetLogger(log)
+
+	wsHub := websocket.NewHub(db, log)
+
+	metricsCollector := metrics.New(db, log, wsHub)
+	h.SetLogger(log)
+
+	h.SetWSHub(wsHub)
+	go wsHub.Run(ctx)
+
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpapp.NewRouter(cfg, log, h, authSvc, metricsCollector.Handler, metricsCollector), ReadHeaderTimeout: 5 * time.Second}
 
 	go func() {
 		log.Info("api listening", zap.String("addr", cfg.HTTPAddr))

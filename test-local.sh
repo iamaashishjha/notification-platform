@@ -74,6 +74,22 @@ else
   fail "Notification log check skipped because send/login failed"
 fi
 
+code="$(request GET "$API_URL/metrics" "$TMP_DIR/metrics.txt")"
+if [[ "$code" == 200 ]]; then
+  grep -q "notifications_sent_total" "$TMP_DIR/metrics.txt" && pass "Metrics endpoint includes notifications_sent_total" || fail "Metrics missing notifications_sent_total"
+else
+  fail "Metrics endpoint (HTTP $code)"
+fi
+
+if [[ -n "$TOKEN" ]]; then
+  code="$(request GET "$API_URL/admin/api/v1/dashboard/stats" "$TMP_DIR/dash.json" -H "Authorization: Bearer $TOKEN")"
+  if [[ "$code" == 200 ]] && grep -q '"sent_today"' "$TMP_DIR/dash.json"; then
+    pass "Dashboard stats endpoint returns data"
+  else
+    fail "Dashboard stats endpoint (HTTP $code)"
+  fi
+fi
+
 code="$(request GET "$ADMIN_URL" "$TMP_DIR/admin.html")"
 [[ "$code" =~ ^(200|304)$ ]] && pass "Admin UI reachable" || fail "Admin UI reachable (HTTP $code; optional in backend-only mode)"
 
