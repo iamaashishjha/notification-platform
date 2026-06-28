@@ -1,13 +1,13 @@
 services:
   postgres:
-    profiles: ["infra", "all"]
+    profiles: ["infra", "api", "workers", "admin", "all"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: notification
       POSTGRES_USER: notification
       POSTGRES_PASSWORD: notification
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -17,24 +17,25 @@ services:
       retries: 5
 
   redis:
-    profiles: ["infra", "all"]
+    profiles: ["infra", "api", "workers", "admin", "all"]
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
 
   rabbitmq:
-    profiles: ["infra", "all"]
+    profiles: ["infra", "api", "workers", "admin", "all"]
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: notification
       RABBITMQ_DEFAULT_PASS: notification
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
 
   migrate:
-    profiles: ["api", "all"]
+    profiles: ["api", "workers", "admin", "all"]
     image: migrate/migrate:v4.17.1
+    restart: "on-failure:5"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,8 +44,9 @@ services:
     command: ["-path", "/migrations", "-database", "postgres://notification:notification@postgres:5432/notification?sslmode=disable", "up"]
 
   seed:
-    profiles: ["api", "all"]
+    profiles: ["api", "workers", "admin", "all"]
     image: postgres:16-alpine
+    restart: "on-failure:5"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -56,7 +58,7 @@ services:
     command: ["psql", "-h", "postgres", "-U", "notification", "-d", "notification", "-f", "seeds/local_seed.sql"]
 
   notification-api:
-    profiles: ["api", "all"]
+    profiles: ["api", "workers", "admin", "all"]
     build:
       context: ./notification-core-api
       args:
@@ -103,7 +105,7 @@ services:
       redis:
         condition: service_started
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null"]
       interval: 30s
@@ -176,7 +178,7 @@ services:
     depends_on:
       - notification-api
     ports:
-      - "3000:3000"
+      - "${ADMIN_UI_PORT:-3000}:3000"
     volumes:
       - ./notification-admin-ui/src:/app/src
 

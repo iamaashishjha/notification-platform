@@ -87,7 +87,7 @@ Keep volumes without a prompt:
 
 ## Troubleshooting
 
-- Port already in use: stop the program on ports 3000, 5432, 5672, 6379, 8080, or 15672, then retry.
+- Port already in use: stop the conflicting program, or override `POSTGRES_PORT`, `REDIS_PORT`, `RABBITMQ_PORT`, `RABBITMQ_MANAGEMENT_PORT`, `API_PORT`, or `ADMIN_UI_PORT` in root `.env`. Container-to-container URLs do not change; hybrid backend URLs must use the selected host ports.
 - API exits at startup: inspect `.runtime/logs/api.log` and confirm infrastructure is healthy with `docker compose --profile infra ps`.
 - Notification stays queued: start the worker matching its channel; the smoke test uses the email worker.
 - Login or API key fails: rerun `make seed`. Seed credentials are defined in `notification-core-api/seeds/local_seed.sql`.
@@ -98,4 +98,3 @@ Keep volumes without a prompt:
 ## Future Kafka support
 
 Kafka is intentionally not included in Compose because no Kafka queue client exists in the Go application. Future work should implement the queue interface for Kafka, validate `QUEUE_DRIVER=kafka`, add Kafka services/profile, and extend the smoke test. RabbitMQ remains the safe default.
-

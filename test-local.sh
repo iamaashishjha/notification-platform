@@ -14,11 +14,17 @@ fail() { printf '\033[1;31mFAIL\033[0m %s\n' "$1"; FAILED=$((FAILED + 1)); }
 
 request() {
   local method="$1" url="$2" output="$3"; shift 3
-  curl -sS --connect-timeout 3 --max-time 15 -o "$output" -w '%{http_code}' -X "$method" "$url" "$@" 2>"$TMP_DIR/curl.err" || printf '000'
+  local status
+  : >"$output"
+  if ! status="$(curl -sS --connect-timeout 3 --max-time 15 -o "$output" -w '%{http_code}' -X "$method" "$url" "$@" 2>"$TMP_DIR/curl.err")"; then
+    status=000
+  fi
+  printf '%s' "$status"
 }
 
 json_value() {
   local file="$1" key="$2"
+  [[ -s "$file" ]] || return 0
   if command -v jq >/dev/null 2>&1; then
     jq -r ".$key // empty" "$file"
   else

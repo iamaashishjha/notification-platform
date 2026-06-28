@@ -6,14 +6,14 @@ WITH demo_tenant AS (
 ),
 admin_user AS (
     INSERT INTO users (email, name, password_hash, is_platform_admin, status)
-    VALUES ('admin@example.com', 'Platform Admin', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36BkNtYLI5KkX9ygM6wRxlW', true, 'active')
-    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, is_platform_admin = true, status = 'active'
+    VALUES ('admin@example.com', 'Platform Admin', '$2a$10$JcPVLWyD/OGfk5LiBnLPYeQQF2qcI24P99nmHwDdIH0vy6XUerc86', true, 'active')
+    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, is_platform_admin = true, status = 'active'
     RETURNING id
 ),
 tenant_user AS (
     INSERT INTO users (email, name, password_hash, is_platform_admin, status)
-    VALUES ('tenant@example.com', 'Tenant User', '$2a$10$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36BkNtYLI5KkX9ygM6wRxlW', false, 'active')
-    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, is_platform_admin = false, status = 'active'
+    VALUES ('tenant@example.com', 'Tenant User', '$2a$10$JcPVLWyD/OGfk5LiBnLPYeQQF2qcI24P99nmHwDdIH0vy6XUerc86', false, 'active')
+    ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, is_platform_admin = false, status = 'active'
     RETURNING id
 ),
 tenant_membership AS (
