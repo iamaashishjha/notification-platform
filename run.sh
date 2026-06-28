@@ -110,7 +110,7 @@ start_background() {
 seed_tenants() {
   check_docker
   info "Running database migrations first"
-  (cd "$ROOT_DIR" && docker compose --profile api run --rm migrate)
+  (cd "$ROOT_DIR" && docker compose --profile api run --rm -T migrate </dev/null)
 
   local choice slug slugs
   cat <<'EOF'
@@ -127,9 +127,9 @@ EOF
   case "$choice" in
     1)
       info "Seeding platform admin user and permissions only"
-      (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+      (cd "$ROOT_DIR" && docker compose --profile api run --rm -T seed </dev/null)
       info "Clearing all tenant data for fresh start..."
-      docker compose --profile api run --rm -T postgres psql -U notification -d notification <<'SQL'
+      docker compose --profile api run --rm -T -e PGPASSWORD=notification postgres psql -h postgres -U notification -d notification <<'SQL'
 DELETE FROM contact_group_members;
 DELETE FROM contact_groups;
 DELETE FROM contacts;
@@ -181,23 +181,23 @@ TENANTS
       fi
 
       info "Seeding base (ecommerce + admin users)..."
-      (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+      (cd "$ROOT_DIR" && docker compose --profile api run --rm -T seed </dev/null)
 
       info "Seeding sample tenants..."
       local seed_volume="$ROOT_DIR/notification-core-api/seeds:/seeds:ro"
       if [[ "$slug" == "all" ]]; then
-        docker compose --profile api run --rm -T -v "$seed_volume" postgres psql -h postgres -U notification -d notification -f /seeds/sample_tenants.sql
+        docker compose --profile api run --rm -T -e PGPASSWORD=notification -v "$seed_volume" postgres psql -h postgres -U notification -d notification -f /seeds/sample_tenants.sql
         ok "All 14 industry sample tenants seeded."
       else
         # Seed only the chosen tenant by running sample_tenants.sql then cleaning others
-        docker compose --profile api run --rm -T -v "$seed_volume" postgres psql -h postgres -U notification -d notification -f /seeds/sample_tenants.sql
-        docker compose --profile api run --rm -T postgres psql -U notification -d notification \
+        docker compose --profile api run --rm -T -e PGPASSWORD=notification -v "$seed_volume" postgres psql -h postgres -U notification -d notification -f /seeds/sample_tenants.sql
+        docker compose --profile api run --rm -T -e PGPASSWORD=notification postgres psql -h postgres -U notification -d notification \
           -c "DELETE FROM tenants WHERE slug NOT IN ('ecommerce','$slug');"
         ok "Seeded tenant: $slug."
       fi
       ;;
     4)
-      (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+      (cd "$ROOT_DIR" && docker compose --profile api run --rm -T seed </dev/null)
       ok "Local seed complete. Ecommerce tenant ready."
       ;;
   esac
@@ -206,9 +206,9 @@ TENANTS
 run_migrations_and_seed() {
   check_docker
   info "Running database migrations"
-  (cd "$ROOT_DIR" && docker compose --profile api run --rm migrate)
+  (cd "$ROOT_DIR" && docker compose --profile api run --rm -T migrate </dev/null)
   info "Loading local seed data"
-  (cd "$ROOT_DIR" && docker compose --profile api run --rm seed)
+  (cd "$ROOT_DIR" && docker compose --profile api run --rm -T seed </dev/null)
 }
 
 start_infrastructure() {
