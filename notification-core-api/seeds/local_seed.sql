@@ -132,18 +132,48 @@ UNION ALL
 SELECT id, 'welcome', 'email', 'Welcome', 'Welcome {{customer_name}} to E-Commerce Store!', 'active' FROM tenants WHERE slug = 'ecommerce'
 ON CONFLICT (tenant_id, template_key, channel, locale) DO UPDATE SET body = EXCLUDED.body, subject = EXCLUDED.subject;
 
-WITH c AS (
-    INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
-    SELECT id, 'cust_001', 'Jane Smith', 'jane@example.com', '+12025551234', 'active' FROM tenants WHERE slug = 'ecommerce'
-    RETURNING id, tenant_id
-),
-g AS (
-    INSERT INTO contact_groups (tenant_id, name, description, status)
-    SELECT id, 'Customers', 'Local testing contacts', 'active' FROM tenants WHERE slug = 'ecommerce'
-    RETURNING id, tenant_id
-)
-INSERT INTO contact_group_members (tenant_id, group_id, contact_id)
-SELECT c.tenant_id, g.id, c.id FROM c, g
+-- Contacts
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'cust_001', 'Jane Smith', 'jane@example.com', '+12025551234', 'active' FROM tenants WHERE slug = 'ecommerce'
 ON CONFLICT DO NOTHING;
 
-SELECT 'Local seed complete. Raw API key shown once for local testing: demo_tenant_api_key_local' AS message;
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'cust_002', 'John Doe', 'john@example.com', '+12025551235', 'active' FROM tenants WHERE slug = 'ecommerce'
+ON CONFLICT DO NOTHING;
+
+-- Groups with unique names
+INSERT INTO contact_groups (tenant_id, name, description, status)
+SELECT id, 'E-commerce VIP Customers', 'High-value customer segment', 'active' FROM tenants WHERE slug = 'ecommerce'
+ON CONFLICT (tenant_id, name) DO UPDATE SET description = EXCLUDED.description;
+
+INSERT INTO contact_groups (tenant_id, name, description, status)
+SELECT id, 'Newsletter Subscribers', 'Email newsletter subscribers', 'active' FROM tenants WHERE slug = 'ecommerce'
+ON CONFLICT (tenant_id, name) DO UPDATE SET description = EXCLUDED.description;
+
+-- Group members
+INSERT INTO contact_group_members (tenant_id, group_id, contact_id)
+SELECT t.id, g.id, c.id
+FROM tenants t
+JOIN contact_groups g ON g.tenant_id = t.id AND g.name = 'E-commerce VIP Customers'
+JOIN contacts c ON c.tenant_id = t.id AND c.external_user_id = 'cust_001'
+WHERE t.slug = 'ecommerce'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contact_group_members (tenant_id, group_id, contact_id)
+SELECT t.id, g.id, c.id
+FROM tenants t
+JOIN contact_groups g ON g.tenant_id = t.id AND g.name = 'Newsletter Subscribers'
+JOIN contacts c ON c.tenant_id = t.id AND c.external_user_id IN ('cust_001', 'cust_002')
+WHERE t.slug = 'ecommerce'
+ON CONFLICT DO NOTHING;
+
+-- Campaigns
+INSERT INTO campaigns (tenant_id, name, description, status, scheduled_at)
+SELECT id, 'Summer Sale 2025', 'Annual summer sale campaign', 'draft', NULL FROM tenants WHERE slug = 'ecommerce'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO campaigns (tenant_id, name, description, status, scheduled_at)
+SELECT id, 'New Product Launch', 'Launch campaign for new product line', 'approved', '2025-12-01 09:00:00+00' FROM tenants WHERE slug = 'ecommerce'
+ON CONFLICT DO NOTHING;
+
+SELECT 'Local seed complete. Users: admin@example.com / tenant@example.com. Groups: E-commerce VIP Customers, Newsletter Subscribers.' AS message;

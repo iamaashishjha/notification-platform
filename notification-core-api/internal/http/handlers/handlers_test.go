@@ -560,6 +560,38 @@ func TestAllTenantRoutesRegisteredInRouter(t *testing.T) {
 	}
 }
 
+func TestSettingsHandlersRegistered(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "func (h Handler) GetTenantSettings(") {
+		t.Fatal("GetTenantSettings handler not found")
+	}
+	if !strings.Contains(src, "func (h Handler) UpdateTenantSettings(") {
+		t.Fatal("UpdateTenantSettings handler not found")
+	}
+}
+
+func TestCatalogHandlersRegistered(t *testing.T) {
+	src := openSource(t)
+	for _, name := range []string{"ListFeatureCatalog", "ListChannelCatalog", "ListProviderTypes"} {
+		if !strings.Contains(src, "func (h Handler) "+name+"(") {
+			t.Fatalf("%s handler not found", name)
+		}
+	}
+}
+
+func TestSettingsPermissionsInGranularToBroad(t *testing.T) {
+	raw, err := os.ReadFile("../../auth/auth.go")
+	if err != nil {
+		t.Fatalf("cannot read auth.go: %v", err)
+	}
+	src := string(raw)
+	for _, perm := range []string{"settings.view", "settings.update"} {
+		if !strings.Contains(src, `"`+perm+`"`) {
+			t.Errorf("permission %s not found in granularToBroad map", perm)
+		}
+	}
+}
+
 func TestTenantPermissionsInGranularToBroad(t *testing.T) {
 	raw, err := os.ReadFile("../../auth/auth.go")
 	if err != nil {

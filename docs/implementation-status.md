@@ -328,3 +328,56 @@
 - No notification pipeline tests ❌
 - No WebSocket auth tests ❌
 - test-local.sh provides basic smoke tests (health, login, send, metrics, dashboard, UI) ✓
+
+## Phase 15: UI Polish & Settings
+**Status: Complete**
+
+- Provider config edit UI (inline row edit, masked secrets, channel/provider/default/status fields) ✓
+- Send notification with recipient mode selection (contact, group, direct email, direct phone, FCM token, FCM topic, WebSocket user) ✓
+- Send notification loads contacts, groups, and templates for the selected tenant ✓
+- Settings page with real form (timezone, country, default sender, default SMS, branding logo, metadata) ✓
+- Settings saved to tenant's config_json via GET/PUT settings API ✓
+- Backend GetTenantSettings/UpdateTenantSettings handlers with tenant-isolation ✓
+- Settings routes registered with middleware (settings.view, settings.update permissions) ✓
+- Structural tests for settings handlers and permissions ✓
+- Lucide-react icons (Plus, Eye, Pencil, Trash2, Play, Power, Send, XCircle, UserPlus, UserX) on all 12 list page action buttons ✓
+- TypeScript strict mode clean, Vite build passes ✓
+
+## Phase 16: Tenant-Centric Admin Console Refactor
+**Status: Complete**
+
+### Backend
+- Platform catalog endpoints: GET /admin/api/v1/feature-catalog, /channel-catalog, /provider-types (GROUP BY queries, no tenant rows) ✓
+- Catalog routes registered with existing view permissions ✓
+- Structural tests for catalog handlers (handler existence + permissions) ✓
+
+### Frontend — Information Architecture
+- Sidebar refactored into grouped sections (Platform/Data/Security/System for platform admin, Overview/Notifications/Address Book/Content/Access/Configuration for tenant user) ✓
+- Permissions page added to sidebar navigation ✓
+- Removed unused ModulePage.tsx dead code ✓
+
+### Frontend — Platform Catalog Pages
+- FeaturesPage: now shows Feature Catalog (no tenant_name column) with description, tenant usage count, "Manage" link to tenants ✓
+- ChannelsPage: now shows Channel Catalog (no tenant_name column) with description, tenant usage count, "Configure" link ✓
+- ProvidersPage: now shows Provider Types (no tenant_name column) with supported channels, tenant usage count ✓
+
+### Frontend — View/Edit/Delete Buttons Added
+- UsersPage: View detail drawer, inline Edit (name/email), Delete ✓
+- ContactsPage: inline Edit (name/email/phone/external_ref) ✓
+- TemplatesPage: View preview drawer, inline Edit (key/channel/subject/body) ✓
+- RolesPage: View detail drawer, inline Edit (name/key) ✓
+- GroupsPage: loading state added ✓
+
+### Frontend — Fixes
+- LoginPage: removed hardcoded demo credentials (admin@example.com/password) ✓
+- SettingsPage: added tenant selector dropdown for platform admin ✓
+- DashboardPage: added loading skeleton animation, removed filler "Operations" panel ✓
+- SendNotificationPage: channel checkboxes instead of comma-separated text, removed demo default values (event/templateKey/payload), added scheduled send datetime picker, event validation, loading indicator for tenant data ✓
+- PermissionsPage: added loading state + empty state ✓
+- NotificationsPage: View/detail drill-down ✓
+
+### Validation
+- `go test ./...` — all pass ✓
+- `go build ./cmd/...` — clean ✓
+- `npx tsc --noEmit` — 0 errors ✓
+- `npx vite build` — production build succeeds ✓

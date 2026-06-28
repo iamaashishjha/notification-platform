@@ -128,3 +128,33 @@ docs/backup-restore.md.
 ### Phase 12: Frontend Tests
 **Priority**: Medium
 Add React component tests with Vitest.
+
+## Completed (Phase 16: Tenant-Centric Admin Console Refactor)
+
+### Phase 16a: Backend Catalog Endpoints
+- GET /admin/api/v1/feature-catalog, /channel-catalog, /provider-types
+- Structural tests for handler existence and permissions
+
+### Phase 16b: Frontend IA & Sidebar
+- Sidebar grouped into sections (Platform/Data/Security/System for platform admin, Overview/Notifications/Address Book/Content/Access/Configuration for tenant user)
+- Permissions page linked in sidebar
+- Removed unused ModulePage.tsx
+
+### Phase 16c: Catalog Pages
+- FeaturesPage → Feature Catalog (no tenant rows)
+- ChannelsPage → Channel Catalog (no tenant rows)
+- ProvidersPage → Provider Types (no tenant rows)
+
+### Phase 16d: View/Edit/Delete Buttons
+- UsersPage: View drawer, inline Edit, Delete
+- ContactsPage: inline Edit
+- TemplatesPage: preview drawer, inline Edit
+- RolesPage: view drawer, inline Edit
+- GroupsPage: loading state
+
+### Phase 16e: UX Fixes
+- LoginPage: no hardcoded demo credentials
+- SettingsPage: tenant selector for platform admin
+- DashboardPage: loading skeleton, removed filler operations
+- SendNotificationPage: channel checkboxes, scheduled send, no demo defaults
+- PermissionsPage: loading + empty states

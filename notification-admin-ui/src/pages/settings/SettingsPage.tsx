@@ -1,22 +1,153 @@
+import { FormEvent, useEffect, useState } from 'react';
+import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { useAuth } from '../../auth/AuthContext';
+import { Save } from 'lucide-react';
+
+type TenantOption = { id: string; name: string; slug: string };
 
 export function SettingsPage() {
+  const { user, can } = useAuth();
+  const isPlatform = user?.is_platform_admin ?? false;
+  const myTenantId = user?.tenant_id ?? '';
+  const [tenants, setTenants] = useState<TenantOption[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState(isPlatform ? '' : myTenantId);
+  const [timezone, setTimezone] = useState('');
+  const [country, setCountry] = useState('');
+  const [defaultSender, setDefaultSender] = useState('');
+  const [defaultSms, setDefaultSms] = useState('');
+  const [brandingLogo, setBrandingLogo] = useState('');
+  const [metadata, setMetadata] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (isPlatform) {
+      list<TenantOption>('/admin/api/v1/tenants').then((res) => {
+        setTenants(res.data);
+        if (res.data.length && !selectedTenantId) setSelectedTenantId(res.data[0].id);
+      }).catch(() => {});
+    }
+  }, [isPlatform, selectedTenantId]);
+
+  useEffect(() => {
+    if (!selectedTenantId) { setLoading(false); return; }
+    setLoading(true);
+    apiRequest<{ data: Record<string, any> }>(`/admin/api/v1/tenants/${selectedTenantId}/settings`).then((res) => {
+      const d = res.data || {};
+      setTimezone(d.timezone || '');
+      setCountry(d.country || '');
+      setDefaultSender(d.default_sender || '');
+      setDefaultSms(d.default_sms || '');
+      setBrandingLogo(d.branding_logo || '');
+      setMetadata(d.metadata ? JSON.stringify(d.metadata, null, 2) : '');
+    }).catch((err) => setError(err.message)).finally(() => setLoading(false));
+  }, [selectedTenantId]);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedTenantId) return;
+    setSaving(true); setError(''); setMessage('');
+    const body: Record<string, unknown> = {
+      timezone: timezone || null,
+      country: country || null,
+      default_sender: defaultSender || null,
+      default_sms: defaultSms || null,
+      branding_logo: brandingLogo || null,
+    };
+    if (metadata.trim()) {
+      try { body.metadata = JSON.parse(metadata); }
+      catch { setError('Invalid JSON in metadata'); setSaving(false); return; }
+    }
+    try {
+      await apiRequest(`/admin/api/v1/tenants/${selectedTenantId}/settings`, { method: 'PUT', body: JSON.stringify(body) });
+      setMessage('Settings saved');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Save failed'); }
+    finally { setSaving(false); }
+  }
+
+  if (!selectedTenantId) return <Panel title="Settings"><div className="py-8 text-center text-slate-400">Select a tenant to manage settings</div></Panel>;
+
   return (
-    <Panel title="Settings">
-      <div className="max-w-2xl space-y-6">
-        <div className="rounded-md border border-slate-200 p-4">
-          <h3 className="mb-2 text-sm font-medium">Tenant Configuration</h3>
-          <p className="text-sm text-slate-600">Tenant settings such as company name, branding, timezone, and default sender can be stored in the tenant's <code className="rounded bg-slate-100 px-1 py-0.5 text-xs">config_json</code> field.</p>
-        </div>
-        <div className="rounded-md border border-slate-200 p-4">
-          <h3 className="mb-2 text-sm font-medium">Retention</h3>
-          <p className="text-sm text-slate-600">Audit log and notification retention policies are not yet configurable through the UI. Backend retention can be managed through database-level cleanup jobs.</p>
-        </div>
-        <div className="rounded-md border border-slate-200 p-4">
-          <h3 className="mb-2 text-sm font-medium">Notification Defaults</h3>
-          <p className="text-sm text-slate-600">Default priority, channel preferences, and fallback behavior are configured per-tenant through the tenant_channels and tenant_features tables.</p>
-        </div>
-      </div>
+    <Panel title="Settings" actions={can('settings.update') ? <button onClick={submit} disabled={saving} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"><Save size={14} />{saving ? 'Saving...' : 'Save'}</button> : undefined}>
+      {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
+
+      {isPlatform && (
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block font-medium">Tenant</span>
+          <select value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
+            {tenants.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>)}
+          </select>
+        </label>
+      )}
+
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Loading settings...</div>
+      ) : (
+        <form onSubmit={submit} className="max-w-2xl space-y-4">
+          <div className="rounded-md border border-slate-200 p-4">
+            <h3 className="mb-3 text-sm font-medium">General</h3>
+            <div className="space-y-3">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Timezone</span>
+                <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
+                  <option value="">Default (UTC)</option>
+                  <option value="America/New_York">America/New_York</option>
+                  <option value="America/Chicago">America/Chicago</option>
+                  <option value="America/Denver">America/Denver</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles</option>
+                  <option value="Europe/London">Europe/London</option>
+                  <option value="Europe/Berlin">Europe/Berlin</option>
+                  <option value="Asia/Shanghai">Asia/Shanghai</option>
+                  <option value="Asia/Tokyo">Asia/Tokyo</option>
+                  <option value="Asia/Kolkata">Asia/Kolkata</option>
+                  <option value="Australia/Sydney">Australia/Sydney</option>
+                  <option value="Pacific/Auckland">Pacific/Auckland</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Country</span>
+                <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="US" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 p-4">
+            <h3 className="mb-3 text-sm font-medium">Notification Defaults</h3>
+            <div className="space-y-3">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Default Email Sender</span>
+                <input value={defaultSender} onChange={(e) => setDefaultSender(e.target.value)} placeholder="noreply@example.com" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Default SMS Sender</span>
+                <input value={defaultSms} onChange={(e) => setDefaultSms(e.target.value)} placeholder="+12025551212" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" />
+              </label>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-slate-200 p-4">
+            <h3 className="mb-3 text-sm font-medium">Branding</h3>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Logo URL</span>
+              <input value={brandingLogo} onChange={(e) => setBrandingLogo(e.target.value)} placeholder="https://example.com/logo.png" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" />
+            </label>
+          </div>
+
+          {isPlatform && (
+            <div className="rounded-md border border-slate-200 p-4">
+              <h3 className="mb-3 text-sm font-medium">Metadata (platform admin only)</h3>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Custom JSON</span>
+                <textarea value={metadata} onChange={(e) => setMetadata(e.target.value)} rows={4} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs" />
+              </label>
+            </div>
+          )}
+        </form>
+      )}
     </Panel>
   );
 }

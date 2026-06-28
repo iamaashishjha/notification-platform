@@ -223,29 +223,92 @@ UNION ALL
 SELECT t.id, 'invoice_ready', 'email', 'Invoice Ready', 'Your invoice for {{billing_period}} is ready. Total: ${{amount}}.', 'active' FROM tenants t WHERE t.slug = 'saas'
 ON CONFLICT (tenant_id, template_key, channel, locale) DO NOTHING;
 
--- Sample contacts for fintech
+-- Contacts for all 14 sample tenants
 INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
 SELECT id, 'fin_cust_001', 'Alice Johnson', 'alice@fintech.example', '+12025551201', 'active' FROM tenants WHERE slug = 'fintech'
 ON CONFLICT DO NOTHING;
 
--- Sample contacts for hrms
 INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
 SELECT id, 'hr_emp_001', 'Bob Williams', 'bob@hrms.example', '+12025551202', 'active' FROM tenants WHERE slug = 'hrms'
 ON CONFLICT DO NOTHING;
 
--- Sample contacts for healthcare
 INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
 SELECT id, 'pat_001', 'Carol Davis', 'carol@health.example', '+12025551203', 'active' FROM tenants WHERE slug = 'healthcare'
 ON CONFLICT DO NOTHING;
 
--- Sample contacts for logistics
 INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
 SELECT id, 'log_cust_001', 'David Brown', 'david@logistics.example', '+12025551204', 'active' FROM tenants WHERE slug = 'logistics'
 ON CONFLICT DO NOTHING;
 
--- Sample contacts for edtech
 INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
 SELECT id, 'stu_001', 'Eve Martinez', 'eve@edtech.example', '+12025551205', 'active' FROM tenants WHERE slug = 'edtech'
 ON CONFLICT DO NOTHING;
 
-SELECT 'Sample tenants seeded. API keys: sample_fintech, sample_hrms, sample_healthcare, etc.' AS message;
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 're_cust_001', 'Frank Lee', 'frank@realestate.example', '+12025551206', 'active' FROM tenants WHERE slug = 'realestate'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'trav_cust_001', 'Grace Kim', 'grace@travel.example', '+12025551207', 'active' FROM tenants WHERE slug = 'travel'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'food_cust_001', 'Henry Chen', 'henry@food.example', '+12025551208', 'active' FROM tenants WHERE slug = 'food'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'bank_cust_001', 'Iris Wang', 'iris@banking.example', '+12025551209', 'active' FROM tenants WHERE slug = 'banking'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'ins_pol_001', 'Jack Smith', 'jack@insurance.example', '+12025551210', 'active' FROM tenants WHERE slug = 'insurance'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'social_usr_001', 'Kate Brown', 'kate@social.example', '+12025551211', 'active' FROM tenants WHERE slug = 'social'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'game_usr_001', 'Leo Park', 'leo@gaming.example', '+12025551212', 'active' FROM tenants WHERE slug = 'gaming'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'iot_dev_001', 'Maria Santos', 'maria@iot.example', '+12025551213', 'active' FROM tenants WHERE slug = 'iot'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO contacts (tenant_id, external_user_id, name, email, phone, status)
+SELECT id, 'saas_acc_001', 'Nathan Green', 'nathan@saas.example', '+12025551214', 'active' FROM tenants WHERE slug = 'saas'
+ON CONFLICT DO NOTHING;
+
+-- Groups: unique per tenant
+INSERT INTO contact_groups (tenant_id, name, description, status)
+SELECT t.id, t.name || ' Customers', 'Primary customer segment for ' || t.name, 'active' FROM tenants t WHERE t.slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
+ON CONFLICT (tenant_id, name) DO NOTHING;
+
+INSERT INTO contact_groups (tenant_id, name, description, status)
+SELECT t.id, t.name || ' VIP', 'VIP segment for ' || t.name, 'active' FROM tenants t WHERE t.slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
+ON CONFLICT (tenant_id, name) DO NOTHING;
+
+INSERT INTO contact_groups (tenant_id, name, description, status)
+SELECT t.id, t.name || ' Trial Users', 'Trial/free tier users for ' || t.name, 'active' FROM tenants t WHERE t.slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
+ON CONFLICT (tenant_id, name) DO NOTHING;
+
+-- Add each tenant's contact to their primary group
+INSERT INTO contact_group_members (tenant_id, group_id, contact_id)
+SELECT t.id, g.id, c.id
+FROM tenants t
+JOIN contact_groups g ON g.tenant_id = t.id AND g.name = t.name || ' Customers'
+JOIN contacts c ON c.tenant_id = t.id
+WHERE t.slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
+ON CONFLICT DO NOTHING;
+
+-- Draft campaigns for each sample tenant
+INSERT INTO campaigns (tenant_id, name, description, status, scheduled_at)
+SELECT id, 'Q4 Promotional', 'Q4 promotional campaign', 'draft', NULL FROM tenants WHERE slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO campaigns (tenant_id, name, description, status, scheduled_at)
+SELECT id, 'Welcome Series', 'New user onboarding campaign', 'draft', NULL FROM tenants WHERE slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
+ON CONFLICT DO NOTHING;
+
+SELECT 'Sample tenants seeded. Unique groups per tenant, campaigns, and contacts added.' AS message;

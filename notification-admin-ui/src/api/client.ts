@@ -10,7 +10,8 @@ export async function apiRequest<T>(path: string, options: RequestInit = {}): Pr
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error ?? 'Request failed');
+    const msg = data.error || data.detail || `${response.status} ${response.statusText}`;
+    throw new Error(`[${response.status}] ${path}: ${msg}`);
   }
   return data as T;
 }

@@ -13,13 +13,20 @@ import (
 
 func (h Handler) ListContacts(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT id::text, tenant_id::text, COALESCE(external_user_id,''), COALESCE(name,''), COALESCE(email,''), COALESCE(phone,''), status, created_at FROM contacts`
+	tenantFilter := r.URL.Query().Get("tenant_id")
+	q := `SELECT c.id::text, c.tenant_id::text, COALESCE(c.external_user_id,''), COALESCE(c.name,''), COALESCE(c.email,''), COALESCE(c.phone,''), c.status, c.created_at`
 	args := []any{}
-	if !p.IsPlatform {
-		q += ` WHERE tenant_id = $1`
+	if p.IsPlatform {
+		q += `, COALESCE(t.name,'') AS tenant_name FROM contacts c LEFT JOIN tenants t ON t.id = c.tenant_id`
+		if tenantFilter != "" {
+			q += ` WHERE c.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
+	} else {
+		q += ` FROM contacts c WHERE c.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY created_at DESC LIMIT 100`
+	q += ` ORDER BY c.created_at DESC LIMIT 100`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -30,11 +37,20 @@ func (h Handler) ListContacts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, tenantID, extUserID, name, email, phone, status string
 		var createdAt time.Time
-		if err := rows.Scan(&id, &tenantID, &extUserID, &name, &email, &phone, &status, &createdAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
-			return
+		if p.IsPlatform {
+			var tenantName string
+			if err := rows.Scan(&id, &tenantID, &extUserID, &name, &email, &phone, &status, &createdAt, &tenantName); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "external_user_id": extUserID, "name": name, "email": email, "phone": phone, "status": status, "created_at": createdAt})
+		} else {
+			if err := rows.Scan(&id, &tenantID, &extUserID, &name, &email, &phone, &status, &createdAt); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "external_user_id": extUserID, "name": name, "email": email, "phone": phone, "status": status, "created_at": createdAt})
 		}
-		items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "external_user_id": extUserID, "name": name, "email": email, "phone": phone, "status": status, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
@@ -150,10 +166,17 @@ func (h Handler) DeleteContact(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT cg.id::text, cg.tenant_id::text, cg.name, COALESCE(cg.description,''), cg.status, cg.created_at, (SELECT COUNT(*) FROM contact_group_members cgm WHERE cgm.group_id = cg.id) AS member_count FROM contact_groups cg`
+	tenantFilter := r.URL.Query().Get("tenant_id")
+	q := `SELECT cg.id::text, cg.tenant_id::text, cg.name, COALESCE(cg.description,''), cg.status, cg.created_at, (SELECT COUNT(*) FROM contact_group_members cgm WHERE cgm.group_id = cg.id) AS member_count`
 	args := []any{}
-	if !p.IsPlatform {
-		q += ` WHERE cg.tenant_id = $1`
+	if p.IsPlatform {
+		q += `, COALESCE(t.name,'') AS tenant_name FROM contact_groups cg LEFT JOIN tenants t ON t.id = cg.tenant_id`
+		if tenantFilter != "" {
+			q += ` WHERE cg.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
+	} else {
+		q += ` FROM contact_groups cg WHERE cg.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
 	q += ` ORDER BY cg.created_at DESC LIMIT 100`
@@ -168,11 +191,20 @@ func (h Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 		var id, tenantID, name, description, status string
 		var memberCount int
 		var createdAt time.Time
-		if err := rows.Scan(&id, &tenantID, &name, &description, &status, &createdAt, &memberCount); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
-			return
+		if p.IsPlatform {
+			var tenantName string
+			if err := rows.Scan(&id, &tenantID, &name, &description, &status, &createdAt, &memberCount, &tenantName); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "name": name, "description": description, "status": status, "member_count": memberCount, "created_at": createdAt})
+		} else {
+			if err := rows.Scan(&id, &tenantID, &name, &description, &status, &createdAt, &memberCount); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "name": name, "description": description, "status": status, "member_count": memberCount, "created_at": createdAt})
 		}
-		items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "name": name, "description": description, "status": status, "member_count": memberCount, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
@@ -243,10 +275,17 @@ func (h Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT nt.id::text, nt.tenant_id::text, nt.template_key, COALESCE(nt.channel,''), COALESCE(nt.subject,''), nt.status, nt.created_at FROM notification_templates nt`
+	tenantFilter := r.URL.Query().Get("tenant_id")
+	q := `SELECT nt.id::text, nt.tenant_id::text, nt.template_key, COALESCE(nt.channel,''), COALESCE(nt.subject,''), nt.status, nt.created_at`
 	args := []any{}
-	if !p.IsPlatform {
-		q += ` WHERE nt.tenant_id = $1`
+	if p.IsPlatform {
+		q += `, COALESCE(t.name,'') AS tenant_name FROM notification_templates nt LEFT JOIN tenants t ON t.id = nt.tenant_id`
+		if tenantFilter != "" {
+			q += ` WHERE nt.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
+	} else {
+		q += ` FROM notification_templates nt WHERE nt.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
 	q += ` ORDER BY nt.created_at DESC LIMIT 100`
@@ -260,11 +299,20 @@ func (h Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, tenantID, key, channel, subject, status string
 		var createdAt time.Time
-		if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &status, &createdAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
-			return
+		if p.IsPlatform {
+			var tenantName string
+			if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &status, &createdAt, &tenantName); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "template_key": key, "channel": channel, "subject": subject, "status": status, "created_at": createdAt})
+		} else {
+			if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &status, &createdAt); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "template_key": key, "channel": channel, "subject": subject, "status": status, "created_at": createdAt})
 		}
-		items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "template_key": key, "channel": channel, "subject": subject, "status": status, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
@@ -379,10 +427,17 @@ func (h Handler) DeleteTemplate(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListCampaigns(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT c.id::text, c.tenant_id::text, c.name, COALESCE(c.description,''), c.status, COALESCE(c.scheduled_at::text,''), c.created_at FROM campaigns c`
+	tenantFilter := r.URL.Query().Get("tenant_id")
+	q := `SELECT c.id::text, c.tenant_id::text, c.name, COALESCE(c.description,''), c.status, COALESCE(c.scheduled_at::text,''), c.created_at`
 	args := []any{}
-	if !p.IsPlatform {
-		q += ` WHERE c.tenant_id = $1`
+	if p.IsPlatform {
+		q += `, COALESCE(t.name,'') AS tenant_name FROM campaigns c LEFT JOIN tenants t ON t.id = c.tenant_id`
+		if tenantFilter != "" {
+			q += ` WHERE c.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
+	} else {
+		q += ` FROM campaigns c WHERE c.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
 	q += ` ORDER BY c.created_at DESC LIMIT 100`
@@ -396,11 +451,20 @@ func (h Handler) ListCampaigns(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, tenantID, name, description, status, scheduledAt string
 		var createdAt time.Time
-		if err := rows.Scan(&id, &tenantID, &name, &description, &status, &scheduledAt, &createdAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
-			return
+		if p.IsPlatform {
+			var tenantName string
+			if err := rows.Scan(&id, &tenantID, &name, &description, &status, &scheduledAt, &createdAt, &tenantName); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "name": name, "description": description, "status": status, "scheduled_at": scheduledAt, "created_at": createdAt})
+		} else {
+			if err := rows.Scan(&id, &tenantID, &name, &description, &status, &scheduledAt, &createdAt); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+				return
+			}
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "name": name, "description": description, "status": status, "scheduled_at": scheduledAt, "created_at": createdAt})
 		}
-		items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "name": name, "description": description, "status": status, "scheduled_at": scheduledAt, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }

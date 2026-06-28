@@ -2,11 +2,13 @@ import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { useAuth } from '../../auth/AuthContext';
+import { Plus, Trash2 } from 'lucide-react';
 
-type ApiKey = { id: string; tenant_id: string; name: string; scopes: string; status: string; last_used_at: string; created_at: string };
+type ApiKey = { id: string; tenant_id: string; tenant_name?: string; name: string; scopes: string; status: string; last_used_at: string; created_at: string };
 
 export function ApiKeysPage() {
-  const { can } = useAuth();
+  const { user, can } = useAuth();
+  const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<ApiKey[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -43,7 +45,7 @@ export function ApiKeysPage() {
   }
 
   return (
-    <Panel title="API Keys" actions={can('api_keys.create') ? <button onClick={() => setShowForm(!showForm)} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : 'Create API Key'}</button> : undefined}>
+    <Panel title="API Keys" actions={can('api_keys.create') ? <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Create API Key</>}</button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
 
@@ -69,18 +71,19 @@ export function ApiKeysPage() {
       ) : (
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
-            <tr><th className="py-2">Name</th><th>Status</th><th>Last Used</th><th>Created</th><th>Actions</th></tr>
+            <tr><th className="py-2">Name</th>{isPlatform && <th>Tenant</th>}<th>Status</th><th>Last Used</th><th>Created</th><th>Actions</th></tr>
           </thead>
           <tbody>
             {items.map((item) => (
               <tr key={item.id} className="border-b border-slate-100">
                 <td className="py-3 font-medium">{item.name}</td>
+                {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
                 <td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{item.status}</span></td>
                 <td>{item.last_used_at || 'never'}</td>
                 <td>{item.created_at}</td>
                 <td>
                   <div className="flex gap-1">
-                    {item.status === 'active' && can('api_keys.revoke') && <button onClick={() => revoke(item.id)} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">Revoke</button>}
+                    {item.status === 'active' && can('api_keys.revoke') && <button onClick={() => revoke(item.id)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={12} />Revoke</button>}
                   </div>
                 </td>
               </tr>

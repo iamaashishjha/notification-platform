@@ -24,8 +24,8 @@ Status across all modules as determined by actual code inspection.
 | Deliveries | ✅ COMPLETE | Workers + retry + dead-letter |
 | Campaigns | ✅ COMPLETE | Backend + frontend; no automated audience resolution on send |
 | Scheduling | ⚠️ PARTIAL | Scheduler worker exists; no recurring schedules |
-| Feature Flags | ✅ COMPLETE | List + Update endpoints + frontend UI |
-| Provider Configs | ✅ COMPLETE | Full CRUD + test endpoint + real SMTP/HTTP/FCM adapters |
+| Feature Flags | ✅ COMPLETE | Catalog view (no tenant rows), per-tenant enablement via tenant detail page |
+| Provider Configs | ✅ COMPLETE | Full CRUD + test endpoint + real SMTP/HTTP/FCM adapters; catalog view with provider types |
 | API Keys | ✅ COMPLETE | Backend + frontend list/create/revoke |
 | Audit Logs | ✅ COMPLETE | Backend + frontend list view |
 | WebSocket | ✅ COMPLETE | Live endpoint, hub, auth, heartbeat, sync, in-app delivery |
@@ -50,19 +50,23 @@ Status across all modules as determined by actual code inspection.
 | Dashboard | ✅ COMPLETE | 8 stat cards, channel activity, success rate |
 | Tenants | ✅ COMPLETE | List view |
 | Notifications | ✅ COMPLETE | List + Send form |
-| Contacts | ✅ COMPLETE | List/create/delete |
-| Templates | ✅ COMPLETE | List/create/delete |
+| Contacts | ✅ COMPLETE | List/create/delete, inline edit |
+| Templates | ✅ COMPLETE | List/create/delete, inline edit, preview drawer |
 | Campaigns | ✅ COMPLETE | List/create/approve/send/cancel |
-| Roles | ✅ COMPLETE | List/create/delete |
-| Permissions | ✅ COMPLETE | Read-only list |
+| Roles | ✅ COMPLETE | List/create/delete, inline edit, view drawer |
+| Permissions | ✅ COMPLETE | Read-only list, loading/empty states added |
 | API Keys | ✅ COMPLETE | List/create/revoke |
 | Audit Logs | ✅ COMPLETE | Read-only list |
-| Users | ✅ COMPLETE | List/create/update |
-| Features | ✅ COMPLETE | List/toggle |
-| Channels | ✅ COMPLETE | List/update rate limits and quotas |
-| Providers | ✅ COMPLETE | List/create/update/delete |
-| Groups | ✅ COMPLETE | List/create/delete/members |
-| Settings | ✅ COMPLETE | Placeholder page |
+| Users | ✅ COMPLETE | List/create/update/delete, view drawer |
+| Features | ✅ COMPLETE | Catalog view (no tenant rows), usage counts |
+| Channels | ✅ COMPLETE | Catalog view (no tenant rows), usage counts |
+| Providers | ✅ COMPLETE | Catalog view (no tenant rows), usage counts |
+| Groups | ✅ COMPLETE | List/create/delete/members, loading state fixed |
+| Settings | ✅ COMPLETE | Full form with tenant selector for platform admin |
+| Send Notification | ✅ COMPLETE | Channel checkboxes, scheduled send, no demo defaults |
+| Login | ✅ COMPLETE | No hardcoded demo credentials |
+| Dashboard | ✅ COMPLETE | Loading skeleton, no filler content |
+| Sidebar | ✅ COMPLETE | Grouped sections by platform/tenant role |
 
 ## Infrastructure
 
@@ -89,6 +93,6 @@ Status across all modules as determined by actual code inspection.
 
 ## Summary Counts
 
-- **Complete**: 44 modules
+- **Complete**: 51 modules
 - **Partial**: 5 modules
 - **Missing**: 2 modules

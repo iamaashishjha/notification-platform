@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Panel } from '../../components/Panel';
 import { apiRequest } from '../../api/client';
 
 type ChannelStat = {
@@ -21,23 +20,41 @@ type DashboardStats = {
 
 export function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
     apiRequest<DashboardStats>('/admin/api/v1/dashboard/stats')
       .then(setStats)
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
+  if (loading) {
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-4 gap-4">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="animate-pulse rounded-md border border-slate-200 bg-white p-4">
+              <div className="h-3 w-16 rounded bg-slate-200" />
+              <div className="mt-2 h-6 w-12 rounded bg-slate-200" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const primaryCards = [
-    ['Queued', stats?.queued ?? '-'],
-    ['Sent today', stats?.sent_today ?? '-'],
-    ['Failed', stats?.failed ?? '-'],
+    ['Queued', stats?.queued],
+    ['Sent today', stats?.sent_today],
+    ['Failed', stats?.failed],
     ['Success rate', stats ? `${stats.success_rate.toFixed(1)}%` : '-'],
-    ['Retries', stats?.retry_count ?? '-'],
-    ['Dead letter', stats?.dead_letter_count ?? '-'],
-    ['Active campaigns', stats?.active_campaigns ?? '-'],
-    ['WS connections', stats?.ws_connections ?? '-'],
+    ['Retries', stats?.retry_count],
+    ['Dead letter', stats?.dead_letter_count],
+    ['Active campaigns', stats?.active_campaigns],
+    ['WS connections', stats?.ws_connections],
   ];
 
   return (
@@ -49,29 +66,23 @@ export function DashboardPage() {
         {primaryCards.map(([label, value]) => (
           <div key={label} className="rounded-md border border-slate-200 bg-white p-4">
             <div className="text-sm text-slate-500">{label}</div>
-            <div className="mt-2 text-2xl font-semibold">{value}</div>
+            <div className="mt-2 text-2xl font-semibold">{value ?? '-'}</div>
           </div>
         ))}
       </div>
       {stats && stats.channels && stats.channels.length > 0 && (
-        <Panel title="Channel Activity (24h)">
+        <div className="rounded-md border border-slate-200 bg-white p-5">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Channel Activity (24h)</h2>
           <div className="grid grid-cols-4 gap-4">
             {stats.channels.map((ch) => (
-              <div key={ch.channel} className="rounded-md border border-slate-200 bg-white p-4">
+              <div key={ch.channel} className="rounded-md border border-slate-100 p-4">
                 <div className="text-sm capitalize text-slate-500">{ch.channel}</div>
                 <div className="mt-2 text-2xl font-semibold">{ch.count}</div>
               </div>
             ))}
           </div>
-        </Panel>
-      )}
-      <Panel title="Operations">
-        <div className="grid grid-cols-3 gap-4 text-sm">
-          <div className="rounded-md border border-slate-200 p-4">Feature flags and channel checks run at send time.</div>
-          <div className="rounded-md border border-slate-200 p-4">Mock providers keep local delivery testable without credentials.</div>
-          <div className="rounded-md border border-slate-200 p-4">Workers can scale independently through Docker Compose.</div>
         </div>
-      </Panel>
+      )}
     </div>
   );
 }

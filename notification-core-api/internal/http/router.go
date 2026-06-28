@@ -41,9 +41,16 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 	mux.Handle("PATCH /admin/api/v1/tenants/{id}", middleware.Chain(authSvc, "tenants.update", h.UpdateTenant))
 	mux.Handle("PATCH /admin/api/v1/tenants/{id}/status", middleware.Chain(authSvc, "tenants.update", h.UpdateTenantStatus))
 	mux.Handle("GET /admin/api/v1/tenants/{id}/overview", middleware.Chain(authSvc, "tenants.view", h.GetTenantOverview))
+	mux.Handle("GET /admin/api/v1/tenants/{id}/settings", middleware.Chain(authSvc, "settings.view", h.GetTenantSettings))
+	mux.Handle("PUT /admin/api/v1/tenants/{id}/settings", middleware.Chain(authSvc, "settings.update", h.UpdateTenantSettings))
 
 	// Dashboard
 	mux.Handle("GET /admin/api/v1/dashboard/stats", middleware.Chain(authSvc, "notifications.view", h.DashboardStats))
+
+	// Platform Catalog
+	mux.Handle("GET /admin/api/v1/feature-catalog", middleware.Chain(authSvc, "features.view", h.ListFeatureCatalog))
+	mux.Handle("GET /admin/api/v1/channel-catalog", middleware.Chain(authSvc, "channels.view", h.ListChannelCatalog))
+	mux.Handle("GET /admin/api/v1/provider-types", middleware.Chain(authSvc, "providers.view", h.ListProviderTypes))
 
 	// Audit logs
 	mux.Handle("GET /admin/api/v1/audit-logs", middleware.Chain(authSvc, "audit_logs.view", h.ListAuditLogs))
@@ -60,10 +67,12 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 
 	// Roles
 	mux.Handle("GET /admin/api/v1/roles", middleware.Chain(authSvc, "roles.manage", h.ListRoles))
+	mux.Handle("GET /admin/api/v1/roles/{id}", middleware.Chain(authSvc, "roles.manage", h.GetRole))
 	mux.Handle("POST /admin/api/v1/roles", middleware.Chain(authSvc, "roles.manage", h.CreateRole))
 	mux.Handle("PUT /admin/api/v1/roles/{id}", middleware.Chain(authSvc, "roles.manage", h.UpdateRole))
 	mux.Handle("DELETE /admin/api/v1/roles/{id}", middleware.Chain(authSvc, "roles.manage", h.DeleteRole))
 	mux.Handle("GET /admin/api/v1/roles/{id}/permissions", middleware.Chain(authSvc, "roles.manage", h.ListRolePermissions))
+	mux.Handle("PUT /admin/api/v1/roles/{id}/permissions", middleware.Chain(authSvc, "roles.manage", h.SetRolePermissions))
 	mux.Handle("POST /admin/api/v1/roles/{id}/permissions", middleware.Chain(authSvc, "roles.manage", h.AssignRolePermission))
 	mux.Handle("DELETE /admin/api/v1/roles/{role_id}/permissions/{perm_id}", middleware.Chain(authSvc, "roles.manage", h.RemoveRolePermission))
 
