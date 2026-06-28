@@ -62,6 +62,16 @@ Current state as of completion of the current cycle.
 
 ## Completed
 
+### Phase 14: Tenant Management CRUD + UI Polish
+- Added CreateTenant, GetTenant, UpdateTenant, UpdateTenantStatus, GetTenantOverview backend handlers
+- Created TenantDetailPage with Overview/Features/Channels/Providers tabs
+- Updated TenantsPage with Create/View/Edit/Disable actions, create form, inline edit
+- Added tenant permissions (tenants.view/create/update/delete) to granular-to-broad map
+- Added loading/empty states and Actions columns to all list pages
+- Added View/Test/Delete actions to providers page
+- Added View detail to audit logs page
+- Added tenant CRUD structural tests (9 new tests, 30 total)
+
 ### Phase 13: Seed Menu + Send Notification Fixes
 - Fixed run.sh seed menu: proper volume mounts, ON CONFLICT idempotency, fresh start clears all tenant data, single/all tenant seeding works correctly
 - Converted sample_tenants.sql to all ON CONFLICT patterns

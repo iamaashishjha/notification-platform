@@ -9,13 +9,14 @@ export function CampaignsPage() {
   const { can } = useAuth();
   const [items, setItems] = useState<Campaign[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  const load = () => list<Campaign>('/admin/api/v1/campaigns').then((res) => setItems(res.data)).catch((err) => setError(err.message));
+  const load = () => { setLoading(true); list<Campaign>('/admin/api/v1/campaigns').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
   useEffect(() => { load(); }, []);
 
@@ -53,26 +54,34 @@ export function CampaignsPage() {
         </form>
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 text-slate-500">
-          <tr><th className="py-2">Name</th><th>Status</th><th>Scheduled</th><th>Created</th><th></th></tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className="border-b border-slate-100">
-              <td className="py-3 font-medium">{item.name}</td>
-              <td>{item.status}</td>
-              <td>{item.scheduled_at || '-'}</td>
-              <td>{item.created_at}</td>
-              <td className="space-x-2">
-                {item.status === 'draft' && can('campaigns.approve') && <button onClick={() => transition(item.id, 'approve')} className="text-blue-600 hover:underline">Approve</button>}
-                {item.status === 'approved' && can('campaigns.send') && <button onClick={() => transition(item.id, 'send')} className="text-green-600 hover:underline">Send</button>}
-                {(item.status === 'draft' || item.status === 'approved') && can('campaigns.cancel') && <button onClick={() => transition(item.id, 'cancel')} className="text-red-600 hover:underline">Cancel</button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="py-8 text-center text-slate-400">No campaigns found</div>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-slate-200 text-slate-500">
+            <tr><th className="py-2">Name</th><th>Status</th><th>Scheduled</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100">
+                <td className="py-3 font-medium">{item.name}</td>
+                <td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.status === 'active' || item.status === 'sending' ? 'bg-green-100 text-green-700' : item.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{item.status}</span></td>
+                <td>{item.scheduled_at || '-'}</td>
+                <td>{item.created_at}</td>
+                <td>
+                  <div className="flex gap-1">
+                    {item.status === 'draft' && can('campaigns.approve') && <button onClick={() => transition(item.id, 'approve')} className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50">Approve</button>}
+                    {item.status === 'approved' && can('campaigns.send') && <button onClick={() => transition(item.id, 'send')} className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50">Send</button>}
+                    {(item.status === 'draft' || item.status === 'approved') && can('campaigns.cancel') && <button onClick={() => transition(item.id, 'cancel')} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">Cancel</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Panel>
   );
 }

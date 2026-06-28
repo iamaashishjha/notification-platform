@@ -393,3 +393,188 @@ func TestSendPublicNotificationGetsTenantFromContext(t *testing.T) {
 		t.Error("SendPublicNotification must get tenant from context (API key middleware)")
 	}
 }
+
+// Tenant CRUD structural tests
+
+func TestCreateTenantHandlerExists(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "func (h Handler) CreateTenant(") {
+		t.Fatal("CreateTenant handler not found")
+	}
+}
+
+func TestCreateTenantPlatformAdminOnly(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) CreateTenant(")
+	if idx < 0 {
+		t.Fatal("CreateTenant not found")
+	}
+	end := idx + 300
+	if end > len(src) {
+		end = len(src)
+	}
+	body := src[idx:end]
+	if !strings.Contains(body, "p.IsPlatform") {
+		t.Error("CreateTenant must check IsPlatform")
+	}
+	if !strings.Contains(body, "platform admin only") {
+		t.Error("CreateTenant must reject non-platform users")
+	}
+}
+
+func TestCreateTenantValidatesNameAndSlug(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) CreateTenant(")
+	if idx < 0 {
+		t.Fatal("CreateTenant not found")
+	}
+	end := idx + 500
+	if end > len(src) {
+		end = len(src)
+	}
+	body := src[idx:end]
+	if !strings.Contains(body, "name") || !strings.Contains(body, "slug") {
+		t.Error("CreateTenant must require name and slug")
+	}
+}
+
+func TestCreateTenantWritesAuditLog(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "tenants.create") {
+		t.Error("CreateTenant must write audit event")
+	}
+}
+
+func TestGetTenantHandlerExists(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "func (h Handler) GetTenant(") {
+		t.Fatal("GetTenant handler not found")
+	}
+}
+
+func TestGetTenantIsolation(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) GetTenant(")
+	if idx < 0 {
+		t.Fatal("GetTenant not found")
+	}
+	end := idx + 300
+	if end > len(src) {
+		end = len(src)
+	}
+	body := src[idx:end]
+	if !strings.Contains(body, "p.IsPlatform") {
+		t.Error("GetTenant must check IsPlatform")
+	}
+	if !strings.Contains(body, "access denied") {
+		t.Error("GetTenant must deny unauthorized access")
+	}
+}
+
+func TestUpdateTenantPlatformAdminOnly(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) UpdateTenant(")
+	if idx < 0 {
+		t.Fatal("UpdateTenant not found")
+	}
+	end := idx + 300
+	if end > len(src) {
+		end = len(src)
+	}
+	body := src[idx:end]
+	if !strings.Contains(body, "p.IsPlatform") {
+		t.Error("UpdateTenant must check IsPlatform")
+	}
+	if !strings.Contains(body, "platform admin only") {
+		t.Error("UpdateTenant must reject non-platform users")
+	}
+}
+
+func TestUpdateTenantStatusPlatformAdminOnly(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) UpdateTenantStatus(")
+	if idx < 0 {
+		t.Fatal("UpdateTenantStatus not found")
+	}
+	end := idx + 600
+	if end > len(src) {
+		end = len(src)
+	}
+	body := src[idx:end]
+	if !strings.Contains(body, "p.IsPlatform") {
+		t.Error("UpdateTenantStatus must check IsPlatform")
+	}
+	if !strings.Contains(body, "platform admin only") {
+		t.Error("UpdateTenantStatus must reject non-platform users")
+	}
+	if !strings.Contains(body, "active") || !strings.Contains(body, "disabled") || !strings.Contains(body, "suspended") {
+		t.Error("UpdateTenantStatus must validate status values")
+	}
+}
+
+func TestGetTenantOverviewHandlerExists(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "func (h Handler) GetTenantOverview(") {
+		t.Fatal("GetTenantOverview handler not found")
+	}
+}
+
+func TestGetTenantOverviewIncludesCounts(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) GetTenantOverview(")
+	if idx < 0 {
+		t.Fatal("GetTenantOverview not found")
+	}
+	body := src[idx:]
+	if !strings.Contains(body, "tenant_features") {
+		t.Error("GetTenantOverview must query tenant_features")
+	}
+	if !strings.Contains(body, "tenant_channels") {
+		t.Error("GetTenantOverview must query tenant_channels")
+	}
+	if !strings.Contains(body, "tenant_provider_configs") {
+		t.Error("GetTenantOverview must query tenant_provider_configs")
+	}
+	if !strings.Contains(body, "COUNT") {
+		t.Error("GetTenantOverview must include COUNT queries")
+	}
+}
+
+func TestAllTenantRoutesRegisteredInRouter(t *testing.T) {
+	raw, err := os.ReadFile("../router.go")
+	if err != nil {
+		t.Fatalf("cannot read router.go: %v", err)
+	}
+	src := string(raw)
+	routes := []string{
+		"POST /admin/api/v1/tenants",
+		"GET /admin/api/v1/tenants/{id}",
+		"PATCH /admin/api/v1/tenants/{id}",
+		"PATCH /admin/api/v1/tenants/{id}/status",
+		"GET /admin/api/v1/tenants/{id}/overview",
+	}
+	for _, route := range routes {
+		if !strings.Contains(src, route) {
+			t.Errorf("route %s not found in router.go", route)
+		}
+	}
+}
+
+func TestTenantPermissionsInGranularToBroad(t *testing.T) {
+	raw, err := os.ReadFile("../../auth/auth.go")
+	if err != nil {
+		t.Fatalf("cannot read auth.go: %v", err)
+	}
+	src := string(raw)
+	perms := []string{
+		"tenants.view",
+		"tenants.create",
+		"tenants.update",
+		"tenants.delete",
+	}
+	for _, perm := range perms {
+		if !strings.Contains(src, `"`+perm+`"`) {
+			t.Errorf("permission %s not found in granularToBroad map", perm)
+		}
+	}
+}

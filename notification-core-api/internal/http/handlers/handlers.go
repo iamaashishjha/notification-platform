@@ -1267,6 +1267,219 @@ func (h Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"message": "email verified"})
 }
 
+func (h Handler) CreateTenant(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin only"})
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	if req.Name == "" || req.Slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name and slug are required"})
+		return
+	}
+	var id string
+	err := h.db.QueryRow(r.Context(), `INSERT INTO tenants (name, slug) VALUES ($1, $2) RETURNING id::text`, req.Name, req.Slug).Scan(&id)
+	if err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "slug already exists"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "insert failed"})
+		return
+	}
+	_ = h.audit.Write(r.Context(), audit.Event{ActorUserID: p.UserID, ActorType: "user", Action: "tenants.create", ResourceType: "tenant", ResourceID: id})
+	writeJSON(w, http.StatusCreated, map[string]any{"data": map[string]any{"id": id, "name": req.Name, "slug": req.Slug, "status": "active"}})
+}
+
+func (h Handler) GetTenant(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	tenantID := r.PathValue("id")
+	if !p.IsPlatform && p.TenantID != tenantID {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
+		return
+	}
+	var id, name, slug, status string
+	var createdAt, updatedAt time.Time
+	err := h.db.QueryRow(r.Context(), `SELECT id::text, name, slug, status, created_at, updated_at FROM tenants WHERE id = $1`, tenantID).Scan(&id, &name, &slug, &status, &createdAt, &updatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "tenant not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"id": id, "name": name, "slug": slug, "status": status, "created_at": createdAt, "updated_at": updatedAt}})
+}
+
+func (h Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin only"})
+		return
+	}
+	tenantID := r.PathValue("id")
+	var req struct {
+		Name *string `json:"name"`
+		Slug *string `json:"slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	sets := []string{}
+	args := []any{}
+	argN := 1
+	if req.Name != nil {
+		sets = append(sets, "name = $"+itoa(argN))
+		args = append(args, *req.Name)
+		argN++
+	}
+	if req.Slug != nil {
+		sets = append(sets, "slug = $"+itoa(argN))
+		args = append(args, *req.Slug)
+		argN++
+	}
+	if len(sets) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no fields to update"})
+		return
+	}
+	sets = append(sets, "updated_at = now()")
+	args = append(args, tenantID)
+	q := `UPDATE tenants SET ` + strings.Join(sets, ", ") + ` WHERE id = $` + itoa(argN)
+	_, err := h.db.Exec(r.Context(), q, args...)
+	if err != nil {
+		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": "slug already exists"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	_ = h.audit.Write(r.Context(), audit.Event{ActorUserID: p.UserID, ActorType: "user", Action: "tenants.update", ResourceType: "tenant", ResourceID: tenantID})
+	writeJSON(w, http.StatusOK, map[string]any{"message": "tenant updated"})
+}
+
+func (h Handler) UpdateTenantStatus(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin only"})
+		return
+	}
+	tenantID := r.PathValue("id")
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+		return
+	}
+	if req.Status != "active" && req.Status != "disabled" && req.Status != "suspended" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "status must be active, disabled, or suspended"})
+		return
+	}
+	_, err := h.db.Exec(r.Context(), `UPDATE tenants SET status = $1, updated_at = now() WHERE id = $2`, req.Status, tenantID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	_ = h.audit.Write(r.Context(), audit.Event{ActorUserID: p.UserID, ActorType: "user", Action: "tenants.status", ResourceType: "tenant", ResourceID: tenantID})
+	writeJSON(w, http.StatusOK, map[string]any{"message": "status updated"})
+}
+
+func (h Handler) GetTenantOverview(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	tenantID := r.PathValue("id")
+	if !p.IsPlatform && p.TenantID != tenantID {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
+		return
+	}
+
+	var id, name, slug, status string
+	var createdAt, updatedAt time.Time
+	err := h.db.QueryRow(r.Context(), `SELECT id::text, name, slug, status, created_at, updated_at FROM tenants WHERE id = $1`, tenantID).Scan(&id, &name, &slug, &status, &createdAt, &updatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "tenant not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "tenant query failed"})
+		return
+	}
+
+	features := []map[string]any{}
+	fRows, fErr := h.db.Query(r.Context(), `SELECT id::text, feature_key, enabled, created_at FROM tenant_features WHERE tenant_id = $1 ORDER BY feature_key`, tenantID)
+	if fErr == nil {
+		defer fRows.Close()
+		for fRows.Next() {
+			var fid, fkey string
+			var fenabled bool
+			var fcreatedAt time.Time
+			if fRows.Scan(&fid, &fkey, &fenabled, &fcreatedAt) == nil {
+				features = append(features, map[string]any{"id": fid, "feature_key": fkey, "enabled": fenabled, "created_at": fcreatedAt})
+			}
+		}
+	}
+
+	channels := []map[string]any{}
+	cRows, cErr := h.db.Query(r.Context(), `SELECT id::text, channel, enabled, direction, rate_limit_per_second, daily_quota, created_at FROM tenant_channels WHERE tenant_id = $1 ORDER BY channel`, tenantID)
+	if cErr == nil {
+		defer cRows.Close()
+		for cRows.Next() {
+			var cid, ch, dir string
+			var cenabled bool
+			var rl, dq int
+			var ccreatedAt time.Time
+			if cRows.Scan(&cid, &ch, &cenabled, &dir, &rl, &dq, &ccreatedAt) == nil {
+				channels = append(channels, map[string]any{"id": cid, "channel": ch, "enabled": cenabled, "direction": dir, "rate_limit_per_second": rl, "daily_quota": dq, "created_at": ccreatedAt})
+			}
+		}
+	}
+
+	providers := []map[string]any{}
+	pRows, pErr := h.db.Query(r.Context(), `SELECT id::text, channel, provider, is_default, status, created_at FROM tenant_provider_configs WHERE tenant_id = $1 ORDER BY channel, provider`, tenantID)
+	if pErr == nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var pid, pch, prov, pstatus string
+			var pdefault bool
+			var pcreatedAt time.Time
+			if pRows.Scan(&pid, &pch, &prov, &pdefault, &pstatus, &pcreatedAt) == nil {
+				providers = append(providers, map[string]any{"id": pid, "channel": pch, "provider": prov, "is_default": pdefault, "status": pstatus, "created_at": pcreatedAt})
+			}
+		}
+	}
+
+	var usersCount, contactsCount, templatesCount, campaignsCount, apiKeysCount int
+	h.db.QueryRow(r.Context(), `SELECT COUNT(*) FROM tenant_users WHERE tenant_id = $1`, tenantID).Scan(&usersCount)
+	h.db.QueryRow(r.Context(), `SELECT COUNT(*) FROM contacts WHERE tenant_id = $1`, tenantID).Scan(&contactsCount)
+	h.db.QueryRow(r.Context(), `SELECT COUNT(*) FROM notification_templates WHERE tenant_id = $1`, tenantID).Scan(&templatesCount)
+	h.db.QueryRow(r.Context(), `SELECT COUNT(*) FROM campaigns WHERE tenant_id = $1`, tenantID).Scan(&campaignsCount)
+	h.db.QueryRow(r.Context(), `SELECT COUNT(*) FROM tenant_api_keys WHERE tenant_id = $1`, tenantID).Scan(&apiKeysCount)
+
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+		"tenant":    map[string]any{"id": id, "name": name, "slug": slug, "status": status, "created_at": createdAt, "updated_at": updatedAt},
+		"features":  features,
+		"channels":  channels,
+		"providers": providers,
+		"counts": map[string]any{
+			"users":     usersCount,
+			"contacts":  contactsCount,
+			"templates": templatesCount,
+			"campaigns": campaignsCount,
+			"api_keys":  apiKeysCount,
+		},
+	}})
+}
+
 func bcryptHash(password string) (string, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

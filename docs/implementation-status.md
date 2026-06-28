@@ -28,7 +28,7 @@
 - All route permissions updated to granular keys (users.create, providers.test, etc.) ✓
 - Frontend action buttons gated by granular permissions ✓
 
-## Multi-Tenant Isolation
+## Multi-Tenant Isolation & Tenant Management UI
 **Status: Complete**
 
 - Tenant ID on all applicable tables ✓
@@ -44,6 +44,15 @@
 - AddGroupMember: principal extraction + cross-tenant contact-group validation ✓
 - UpdateFeature audit event includes TenantID ✓
 - SendAdminNotification: platform admin requires tenant_id; tenant user forced to own tenant ✓
+- CreateTenant: POST endpoint (platform-admin only) with name/slug validation ✓
+- GetTenant: GET by ID with tenant-user isolation (platform can view any, tenant only own) ✓
+- UpdateTenant: PATCH endpoint (platform-admin only) with dynamic field updates ✓
+- UpdateTenantStatus: PATCH status endpoint (platform-admin only) with active/disabled/suspended ✓
+- GetTenantOverview: GET with features, channels, providers, counts (users/contacts/templates/campaigns/api-keys) ✓
+- TenantDetailPage: `/tenants/:id` with Overview/Features/Channels/Providers tabs ✓
+- TenantsPage: Create/View/Edit/Disable row actions, create form, inline edit ✓
+- All list pages: loading states, empty states, actions columns added ✓
+- Auth: tenant CRUD permissions (tenants.view/create/update/delete) in granular-to-broad map ✓
 
 ## Contacts
 **Status: Complete**

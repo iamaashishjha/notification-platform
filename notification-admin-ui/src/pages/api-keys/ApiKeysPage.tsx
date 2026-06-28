@@ -9,13 +9,14 @@ export function ApiKeysPage() {
   const { can } = useAuth();
   const [items, setItems] = useState<ApiKey[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [message, setMessage] = useState('');
 
-  const load = () => list<ApiKey>('/admin/api/v1/api-keys').then((res) => setItems(res.data)).catch((err) => setError(err.message));
+  const load = () => { setLoading(true); list<ApiKey>('/admin/api/v1/api-keys').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
   useEffect(() => { load(); }, []);
 
@@ -61,22 +62,32 @@ export function ApiKeysPage() {
         </form>
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 text-slate-500">
-          <tr><th className="py-2">Name</th><th>Status</th><th>Last Used</th><th>Created</th><th></th></tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className="border-b border-slate-100">
-              <td className="py-3 font-medium">{item.name}</td>
-              <td>{item.status}</td>
-              <td>{item.last_used_at || 'never'}</td>
-              <td>{item.created_at}</td>
-              <td>{item.status === 'active' && can('api_keys.revoke') && <button onClick={() => revoke(item.id)} className="text-red-600 hover:underline">Revoke</button>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="py-8 text-center text-slate-400">No API keys found</div>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-slate-200 text-slate-500">
+            <tr><th className="py-2">Name</th><th>Status</th><th>Last Used</th><th>Created</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100">
+                <td className="py-3 font-medium">{item.name}</td>
+                <td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{item.status}</span></td>
+                <td>{item.last_used_at || 'never'}</td>
+                <td>{item.created_at}</td>
+                <td>
+                  <div className="flex gap-1">
+                    {item.status === 'active' && can('api_keys.revoke') && <button onClick={() => revoke(item.id)} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">Revoke</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Panel>
   );
 }

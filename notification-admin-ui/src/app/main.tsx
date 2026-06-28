@@ -6,6 +6,7 @@ import { AppLayout } from '../layouts/AppLayout';
 import { LoginPage } from '../pages/login/LoginPage';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { TenantsPage } from '../pages/tenants/TenantsPage';
+import { TenantDetailPage } from '../pages/tenants/TenantDetailPage';
 import { NotificationsPage } from '../pages/notifications/NotificationsPage';
 import { SendNotificationPage } from '../pages/notifications/SendNotificationPage';
 import { ContactsPage } from '../pages/contacts/ContactsPage';
@@ -38,6 +39,7 @@ function App() {
           <Route element={<PrivateRoute />}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/tenants" element={<TenantsPage />} />
+            <Route path="/tenants/:id" element={<TenantDetailPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/notifications/send" element={<SendNotificationPage />} />
             <Route path="/users" element={<UsersPage />} />

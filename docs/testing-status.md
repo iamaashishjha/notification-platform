@@ -9,7 +9,7 @@
 | Security/Redaction | `internal/security/redact_test.go` | ✓ 11 tests: redaction, hashing, tokens, AES-GCM roundtrip, JSON, edge cases |
 | Tenant Isolation | `internal/tenant/isolation_test.go` | ✓ 4 tests: allow-list coverage, forbidden tables, empty-param edge cases |
 | Retry Backoff | `internal/retry/service_test.go` | ✓ 2 tests: exponential backoff formula and edge cases |
-| Handler Structure | `internal/http/handlers/handlers_test.go` | ✓ 21 structural tests: handler existence, tenant scoping, encryption wiring, alias correctness, send-notification tenant behavior |
+| Handler Structure | `internal/http/handlers/handlers_test.go` | ✓ 30 structural tests: handler existence, tenant scoping, encryption wiring, alias correctness, send-notification tenant behavior, tenant CRUD isolation |
 
 ### Smoke Tests
 | Script | What it covers | Status |

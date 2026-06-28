@@ -219,6 +219,10 @@ var granularToBroad = map[string]string{
 	"notifications.bulk_send":  "notifications.manage",
 	"notifications.retry":      "notifications.manage",
 	"notifications.cancel":     "notifications.manage",
+	"tenants.view":             "tenants.manage",
+	"tenants.create":           "tenants.manage",
+	"tenants.update":           "tenants.manage",
+	"tenants.delete":           "tenants.manage",
 }
 
 func (s Service) HasPermission(ctx context.Context, p Principal, permission string) bool {

@@ -16,6 +16,7 @@ Status across all modules as determined by actual code inspection.
 | Authentication | ✅ COMPLETE | Password reset, email verification, audit logging all implemented; MFA not started |
 | Authorization/RBAC | ✅ COMPLETE | Granular permissions with broad fallback, frontend action gating |
 | Multi-Tenant Isolation | ✅ COMPLETE | Full tenant ID scoping, ownership helpers, fixed DashboardStats delivery alias bug, fixed RemoveGroupMember/AddGroupMember isolation, UpdateFeature audit TenantID |
+| Tenant Management | ✅ COMPLETE | Backend CRUD (create/get/update/status/overview) + frontend detail page with features/channels/providers tabs |
 | Contacts CRUD | ✅ COMPLETE | Backend CRUD + frontend list/create/delete |
 | Contact Groups | ✅ COMPLETE | Backend CRUD + member management + frontend UI |
 | Templates CRUD | ✅ COMPLETE | Backend + frontend; no template rendering engine |

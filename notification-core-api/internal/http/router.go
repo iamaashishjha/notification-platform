@@ -36,6 +36,11 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 	mux.Handle("POST /admin/api/v1/notifications/send", middleware.Chain(authSvc, "notifications.send", h.SendAdminNotification))
 	mux.Handle("GET /admin/api/v1/notifications", middleware.Chain(authSvc, "notifications.view", h.ListNotificationLogs))
 	mux.Handle("GET /admin/api/v1/tenants", middleware.Chain(authSvc, "tenants.view", h.ListTenants))
+	mux.Handle("POST /admin/api/v1/tenants", middleware.Chain(authSvc, "tenants.create", h.CreateTenant))
+	mux.Handle("GET /admin/api/v1/tenants/{id}", middleware.Chain(authSvc, "tenants.view", h.GetTenant))
+	mux.Handle("PATCH /admin/api/v1/tenants/{id}", middleware.Chain(authSvc, "tenants.update", h.UpdateTenant))
+	mux.Handle("PATCH /admin/api/v1/tenants/{id}/status", middleware.Chain(authSvc, "tenants.update", h.UpdateTenantStatus))
+	mux.Handle("GET /admin/api/v1/tenants/{id}/overview", middleware.Chain(authSvc, "tenants.view", h.GetTenantOverview))
 
 	// Dashboard
 	mux.Handle("GET /admin/api/v1/dashboard/stats", middleware.Chain(authSvc, "notifications.view", h.DashboardStats))

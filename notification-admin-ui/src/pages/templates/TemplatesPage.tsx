@@ -9,6 +9,7 @@ export function TemplatesPage() {
   const { can } = useAuth();
   const [items, setItems] = useState<Template[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [templateKey, setTemplateKey] = useState('');
   const [channel, setChannel] = useState('email');
@@ -17,7 +18,7 @@ export function TemplatesPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  const load = () => list<Template>('/admin/api/v1/templates').then((res) => setItems(res.data)).catch((err) => setError(err.message));
+  const load = () => { setLoading(true); list<Template>('/admin/api/v1/templates').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
   useEffect(() => { load(); }, []);
 
@@ -59,22 +60,32 @@ export function TemplatesPage() {
         </form>
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 text-slate-500">
-          <tr><th className="py-2">Key</th><th>Channel</th><th>Subject</th><th>Status</th><th></th></tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className="border-b border-slate-100">
-              <td className="py-3 font-medium">{item.template_key}</td>
-              <td>{item.channel || '-'}</td>
-              <td>{item.subject || '-'}</td>
-              <td>{item.status}</td>
-              <td>{can('templates.delete') && <button onClick={() => remove(item.id)} className="text-red-600 hover:underline">Delete</button>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="py-8 text-center text-slate-400">No templates found</div>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-slate-200 text-slate-500">
+            <tr><th className="py-2">Key</th><th>Channel</th><th>Subject</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100">
+                <td className="py-3 font-medium">{item.template_key}</td>
+                <td>{item.channel || '-'}</td>
+                <td>{item.subject || '-'}</td>
+                <td>{item.status}</td>
+                <td>
+                  <div className="flex gap-1">
+                    {can('templates.delete') && <button onClick={() => remove(item.id)} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">Delete</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Panel>
   );
 }

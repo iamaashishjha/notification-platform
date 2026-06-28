@@ -22,8 +22,11 @@
 - DashboardStats delivery queries fixed: separate `deliveryScope` for `notification_deliveries` (notifications use `n.` alias, deliveries use bare `tenant_id`).
 - RemoveGroupMember: added `AND tenant_id = $3` to DELETE query.
 - AddGroupMember: added principal extraction with `cg.tenant_id = $3 AND c.tenant_id = $3` cross-tenant validation.
-- Structural handler tests verify all 40+ handlers for tenant isolation patterns.
+- Structural handler tests verify all 40+ handlers for tenant isolation patterns (30 tests).
 - SendAdminNotification: platform admin must provide `tenant_id` (400 if missing); tenant user silently forced to own tenant (cross-tenant override impossible via request body).
+- Tenant CRUD handlers (CreateTenant, UpdateTenant, UpdateTenantStatus) enforce platform-admin-only via `p.IsPlatform` check — tenant users receive 403.
+- GetTenant and GetTenantOverview allow tenant users to view only their own tenant (cross-tenant access returns 403).
+- GetTenantOverview redacts provider config secrets (uses overview query without config_json field).
 
 **Issue (low — resolved)**: The `UpdateFeature` handler now validates tenant ownership via `WHERE id = $1 AND tenant_id = $3` for non-platform users, and the audit event includes `TenantID`. Verified by handler structural test.
 

@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { useAuth } from '../../auth/AuthContext';
@@ -7,8 +8,10 @@ type User = { id: string; email: string; name: string; is_platform_admin: boolea
 
 export function UsersPage() {
   const { can } = useAuth();
+  const navigate = useNavigate();
   const [items, setItems] = useState<User[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -16,7 +19,7 @@ export function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
 
-  const load = () => list<User>('/admin/api/v1/users').then((res) => setItems(res.data)).catch((err) => setError(err.message));
+  const load = () => { setLoading(true); list<User>('/admin/api/v1/users').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
   useEffect(() => { load(); }, []);
 
@@ -30,6 +33,14 @@ export function UsersPage() {
       load();
     } catch (err) { setError(err instanceof Error ? err.message : 'Create failed'); }
     finally { setSaving(false); }
+  }
+
+  async function toggleUserStatus(user: User) {
+    const newStatus = user.status === 'active' ? 'disabled' : 'active';
+    try {
+      await apiRequest(`/admin/api/v1/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
+      load();
+    } catch (err: any) { setError(err.message); }
   }
 
   return (
@@ -46,21 +57,32 @@ export function UsersPage() {
         </form>
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 text-slate-500">
-          <tr><th className="py-2">Name</th><th>Email</th><th>Role</th><th>Status</th></tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className="border-b border-slate-100">
-              <td className="py-3 font-medium">{item.name}</td>
-              <td>{item.email}</td>
-              <td>{item.is_platform_admin ? 'Platform Admin' : 'User'}</td>
-              <td>{item.status}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="py-8 text-center text-slate-400">No users found</div>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-slate-200 text-slate-500">
+            <tr><th className="py-2">Name</th><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100">
+                <td className="py-3 font-medium">{item.name}</td>
+                <td>{item.email}</td>
+                <td>{item.is_platform_admin ? 'Platform Admin' : 'User'}</td>
+                <td>{item.status}</td>
+                <td>
+                  <div className="flex gap-1">
+                    {can('users.update') && <button onClick={() => toggleUserStatus(item)} className="focus-ring rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">{item.status === 'active' ? 'Disable' : 'Enable'}</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Panel>
   );
 }

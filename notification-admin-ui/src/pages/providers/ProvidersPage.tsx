@@ -9,13 +9,14 @@ export function ProvidersPage() {
   const { can } = useAuth();
   const [items, setItems] = useState<Provider[]>([]);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [channel, setChannel] = useState('email');
   const [providerName, setProviderName] = useState('mock');
   const [saving, setSaving] = useState(false);
 
-  const load = () => list<Provider>('/admin/api/v1/providers').then((res) => setItems(res.data)).catch((err) => setError(err.message));
+  const load = () => { setLoading(true); list<Provider>('/admin/api/v1/providers').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
   useEffect(() => { load(); }, []);
 
@@ -39,6 +40,13 @@ export function ProvidersPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'Delete failed'); }
   }
 
+  async function testProvider(id: string) {
+    try {
+      const res = await apiRequest<{ message: string }>(`/admin/api/v1/providers/${id}/test`, { method: 'POST' });
+      setMessage(res.message || 'Test OK');
+    } catch (err: any) { setError(err.message); }
+  }
+
   return (
     <Panel title="Provider Configs" actions={can('providers.create') ? <button onClick={() => setShowForm(!showForm)} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : 'Add Provider'}</button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -58,23 +66,34 @@ export function ProvidersPage() {
         </form>
       )}
 
-      <table className="w-full text-left text-sm">
-        <thead className="border-b border-slate-200 text-slate-500">
-          <tr><th className="py-2">Channel</th><th>Provider</th><th>Tenant</th><th>Default</th><th>Status</th><th></th></tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id} className="border-b border-slate-100">
-              <td className="py-3 font-medium">{item.channel}</td>
-              <td>{item.provider}</td>
-              <td>{item.tenant_name}</td>
-              <td>{item.is_default ? 'Yes' : 'No'}</td>
-              <td>{item.status}</td>
-              <td>{can('providers.delete') && <button onClick={() => remove(item.id)} className="text-red-600 hover:underline">Delete</button>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {loading ? (
+        <div className="py-8 text-center text-slate-400">Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="py-8 text-center text-slate-400">No provider configs found</div>
+      ) : (
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-slate-200 text-slate-500">
+            <tr><th className="py-2">Channel</th><th>Provider</th><th>Tenant</th><th>Default</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-b border-slate-100">
+                <td className="py-3 font-medium">{item.channel}</td>
+                <td>{item.provider}</td>
+                <td>{item.tenant_name}</td>
+                <td>{item.is_default ? 'Yes' : 'No'}</td>
+                <td>{item.status}</td>
+                <td>
+                  <div className="flex gap-1">
+                    {can('providers.test') && <button onClick={() => testProvider(item.id)} className="rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50">Test</button>}
+                    {can('providers.delete') && <button onClick={() => remove(item.id)} className="rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50">Delete</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Panel>
   );
 }

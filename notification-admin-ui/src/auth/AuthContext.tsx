@@ -50,6 +50,11 @@ const GRANULAR_TO_BROAD: Record<string, string> = {
   'notifications.bulk_send': 'notifications.manage',
   'notifications.retry': 'notifications.manage',
   'notifications.cancel': 'notifications.manage',
+  'tenants.view': 'tenants.manage',
+  'tenants.create': 'tenants.manage',
+  'tenants.update': 'tenants.manage',
+  'tenants.delete': 'tenants.manage',
+  'audit_logs.view': 'audit_logs.manage',
 };
 
 type AuthContextValue = {
