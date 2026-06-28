@@ -1,0 +1,8 @@
+{
+  "mode": "mock",
+  "email": { "provider": "mock" },
+  "sms": { "provider": "mock" },
+  "fcm": { "provider": "mock" },
+  "websocket": { "enabled": true }
+}
+

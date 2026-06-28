@@ -1,5 +1,6 @@
 services:
   postgres:
+    profiles: ["infra", "all"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: notification
@@ -16,11 +17,13 @@ services:
       retries: 5
 
   redis:
+    profiles: ["infra", "all"]
     image: redis:7-alpine
     ports:
       - "6379:6379"
 
   rabbitmq:
+    profiles: ["infra", "all"]
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: notification
@@ -30,6 +33,7 @@ services:
       - "15672:15672"
 
   migrate:
+    profiles: ["api", "all"]
     image: migrate/migrate:v4.17.1
     depends_on:
       postgres:
@@ -39,6 +43,7 @@ services:
     command: ["-path", "/migrations", "-database", "postgres://notification:notification@postgres:5432/notification?sslmode=disable", "up"]
 
   seed:
+    profiles: ["api", "all"]
     image: postgres:16-alpine
     depends_on:
       migrate:
@@ -51,12 +56,45 @@ services:
     command: ["psql", "-h", "postgres", "-U", "notification", "-d", "notification", "-f", "seeds/local_seed.sql"]
 
   notification-api:
+    profiles: ["api", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: api
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: &backend-environment
+      APP_ENV: ${APP_ENV:-local}
+      APP_PORT: ${APP_PORT:-8080}
+      DATABASE_URL: ${DATABASE_URL:-postgres://notification:notification@postgres:5432/notification?sslmode=disable}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://notification:notification@rabbitmq:5672/}
+      QUEUE_DRIVER: ${QUEUE_DRIVER:-rabbitmq}
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-me}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-local-only-change-me}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-local-only-change-me-32-bytes-minimum}
+      INTERNAL_ADMIN_TOKEN: ${INTERNAL_ADMIN_TOKEN:-local-only-change-me}
+      PROVIDER_MODE: ${PROVIDER_MODE:-mock}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-mock}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      AWS_REGION: ${AWS_REGION:-}
+      SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+      SPARROW_TOKEN: ${SPARROW_TOKEN:-}
+      SPARROW_FROM: ${SPARROW_FROM:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM: ${TWILIO_FROM:-}
+      GENERIC_HTTP_SMS_URL: ${GENERIC_HTTP_SMS_URL:-}
+      GENERIC_HTTP_SMS_TOKEN: ${GENERIC_HTTP_SMS_TOKEN:-}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_SERVICE_ACCOUNT_PATH: ${FCM_SERVICE_ACCOUNT_PATH:-}
+      WEBSOCKET_ENABLED: ${WEBSOCKET_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
       seed:
         condition: service_completed_successfully
@@ -73,65 +111,68 @@ services:
       retries: 3
 
   worker-router:
+    profiles: ["workers", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: worker-router
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: *backend-environment
     depends_on: [notification-api]
 
   worker-scheduler:
+    profiles: ["workers", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: worker-scheduler
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: *backend-environment
     depends_on: [notification-api]
 
   worker-email:
+    profiles: ["workers", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: worker-email
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: *backend-environment
     depends_on: [notification-api]
 
   worker-sms:
+    profiles: ["workers", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: worker-sms
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: *backend-environment
     depends_on: [notification-api]
 
   worker-fcm:
+    profiles: ["workers", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: worker-fcm
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: *backend-environment
     depends_on: [notification-api]
 
   worker-websocket:
+    profiles: ["workers", "all"]
     build:
       context: ./notification-core-api
       args:
         CMD: worker-websocket
-    env_file:
-      - ./notification-core-api/.env.example
+    environment: *backend-environment
     depends_on: [notification-api]
 
   notification-admin-ui:
+    profiles: ["admin", "all"]
     build:
       context: ./notification-admin-ui
       target: dev
     environment:
-      VITE_API_BASE_URL: http://localhost:8080
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8080}
+      VITE_APP_NAME: ${VITE_APP_NAME:-Notification Platform}
     depends_on:
       - notification-api
     ports:

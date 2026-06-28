@@ -20,20 +20,43 @@ Infrastructure decides how much traffic it can handle.
 
 Go keeps the API and workers small, fast, and easy to ship as separate binaries. React provides a flexible admin UI for platform operations, tenant configuration, campaign work, logs, and manual sends.
 
-## Local Setup
+## Local development
 
 ```sh
-cd notification-platform
-docker compose up --build
+chmod +x run.sh stop.sh test-local.sh
+./run.sh
 ```
 
-Services:
+The interactive runner can start the complete Docker stack, a hybrid setup (infrastructure in Docker and applications with system tools), infrastructure only, individual applications, or selected workers. Local system processes write logs and PID files under `.runtime/`.
+
+Quick non-interactive targets are also available:
+
+```sh
+make infra       # PostgreSQL, Redis, RabbitMQ
+make api         # Docker API (and its dependencies)
+make workers     # Docker workers
+make admin       # Docker admin UI
+make test-local  # end-to-end local smoke checks
+make stop        # keep database volumes
+```
+
+Local services:
 
 - API: `http://localhost:8080`
 - Admin UI: `http://localhost:3000`
 - RabbitMQ management: `http://localhost:15672` (`notification` / `notification`)
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
+
+Seed credentials:
+
+- Platform admin: `admin@example.com` / `password`
+- Tenant user: `tenant@example.com` / `password`
+- Tenant API key: `demo_tenant_api_key_local`
+
+Mock providers are the safe local default. Provider credentials belong only in ignored backend files, never in the frontend or committed examples. The current worker implementations deliver through mock adapters; email/SMS/FCM real-provider values can be prepared locally for future adapters but are not sent to those services yet.
+
+See [Local development](docs/local-development.md) and [Provider configuration](docs/provider-configuration.md) for every mode, stopping/volume cleanup, troubleshooting, and security details.
 
 ## Migrations and Seed
 
@@ -45,12 +68,7 @@ make migrate-up
 make seed
 ```
 
-Seed credentials:
-
-- Platform admin: `admin@example.com` / `password`
-- Tenant user: `tenant@example.com` / `password`
-- Demo tenant slug: `demo-ride`
-- Local raw API key: `demo_tenant_api_key_local`
+Demo tenant slug: `demo-ride`.
 
 Raw API keys are stored only as hashes. The seed prints the local key once for testing.
 
@@ -106,8 +124,8 @@ The schema includes `campaigns`, `campaign_recipients`, and `scheduled_jobs` for
 ## Worker Scaling
 
 ```sh
-docker compose up -d --scale worker-sms=5
-docker compose up -d --scale worker-fcm=5
+docker compose --profile all up -d --scale worker-sms=5
+docker compose --profile all up -d --scale worker-fcm=5
 ```
 
 API nodes remain stateless. PostgreSQL, Redis, and RabbitMQ are shared state.

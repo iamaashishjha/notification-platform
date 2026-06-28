@@ -1,0 +1,17 @@
+# Local configuration and secrets
+.env
+.env.local
+**/.env.local
+*.local.json
+*provider*secret*
+*service-account*.json
+
+# Local runner state
+.runtime/
+
+# Common build output
+node_modules/
+dist/
+coverage/
+*.log
+

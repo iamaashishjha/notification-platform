@@ -1,0 +1,10 @@
+.git
+.env
+.env.local
+*.local.json
+bin
+build
+dist
+coverage.out
+*.log
+

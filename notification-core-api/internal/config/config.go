@@ -25,14 +25,22 @@ type Config struct {
 }
 
 func Load() Config {
+	httpAddr := env("HTTP_ADDR", "")
+	if httpAddr == "" {
+		httpAddr = ":" + env("APP_PORT", "8080")
+	}
+	redisAddr := env("REDIS_ADDR", "")
+	if redisAddr == "" {
+		redisAddr = redisAddress(env("REDIS_URL", "redis://redis:6379/0"))
+	}
 	return Config{
 		AppEnv:            env("APP_ENV", "local"),
-		HTTPAddr:          env("HTTP_ADDR", ":8080"),
+		HTTPAddr:          httpAddr,
 		DatabaseURL:       env("DATABASE_URL", "postgres://notification:notification@postgres:5432/notification?sslmode=disable"),
-		RedisAddr:         env("REDIS_ADDR", "redis:6379"),
+		RedisAddr:         redisAddr,
 		RabbitMQURL:       env("RABBITMQ_URL", "amqp://notification:notification@rabbitmq:5672/"),
 		JWTSecret:         env("JWT_SECRET", "local-dev-change-me"),
-		CORSOrigins:       strings.Split(env("CORS_ORIGINS", "http://localhost:3000"), ","),
+		CORSOrigins:       strings.Split(env("CORS_ORIGINS", env("CORS_ALLOWED_ORIGINS", "http://localhost:3000")), ","),
 		SchedulerEvery:    time.Duration(envInt("SCHEDULER_INTERVAL_SECONDS", 15)) * time.Second,
 		MaxDeliveryTries:  envInt("MAX_DELIVERY_ATTEMPTS", 3),
 		LoginMaxFailures:  envInt("LOGIN_MAX_FAILURES", 5),
@@ -41,6 +49,21 @@ func Load() Config {
 		AccessTokenTTL:    time.Duration(envInt("ACCESS_TOKEN_TTL_MINUTES", 15)) * time.Minute,
 		WebSocketTokenTTL: time.Duration(envInt("WEBSOCKET_TOKEN_TTL_SECONDS", 60)) * time.Second,
 	}
+}
+
+func redisAddress(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "redis://")
+	if at := strings.LastIndex(raw, "@"); at >= 0 {
+		raw = raw[at+1:]
+	}
+	if slash := strings.Index(raw, "/"); slash >= 0 {
+		raw = raw[:slash]
+	}
+	if raw == "" {
+		return "redis:6379"
+	}
+	return raw
 }
 
 func env(key, fallback string) string {

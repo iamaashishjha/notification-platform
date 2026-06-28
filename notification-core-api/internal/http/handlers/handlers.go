@@ -156,7 +156,9 @@ func (h Handler) ListNotificationLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.db.Query(r.Context(), `
-SELECT n.public_id, t.name, n.event_key, n.status, n.created_at
+SELECT n.public_id, t.name, n.event_key, n.status,
+       COALESCE((SELECT d.status FROM notification_deliveries d WHERE d.notification_id = n.id ORDER BY d.updated_at DESC LIMIT 1), 'pending') AS delivery_status,
+       n.created_at
 FROM notifications n
 JOIN tenants t ON t.id = n.tenant_id
 ORDER BY n.created_at DESC LIMIT 100`)
@@ -167,20 +169,22 @@ ORDER BY n.created_at DESC LIMIT 100`)
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var publicID, tenantName, event, status string
+		var publicID, tenantName, event, status, deliveryStatus string
 		var createdAt time.Time
-		if err := rows.Scan(&publicID, &tenantName, &event, &status, &createdAt); err != nil {
+		if err := rows.Scan(&publicID, &tenantName, &event, &status, &deliveryStatus, &createdAt); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 			return
 		}
-		items = append(items, map[string]any{"public_id": publicID, "tenant": tenantName, "event": event, "status": status, "created_at": createdAt})
+		items = append(items, map[string]any{"public_id": publicID, "tenant": tenantName, "event": event, "status": status, "delivery_status": deliveryStatus, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
 
 func (h Handler) listTenantNotificationLogs(w http.ResponseWriter, r *http.Request, tenantID string) {
 	rows, err := h.db.Query(r.Context(), `
-SELECT n.public_id, t.name, n.event_key, n.status, n.created_at
+SELECT n.public_id, t.name, n.event_key, n.status,
+       COALESCE((SELECT d.status FROM notification_deliveries d WHERE d.notification_id = n.id ORDER BY d.updated_at DESC LIMIT 1), 'pending') AS delivery_status,
+       n.created_at
 FROM notifications n
 JOIN tenants t ON t.id = n.tenant_id
 WHERE n.tenant_id = $1
@@ -192,13 +196,13 @@ ORDER BY n.created_at DESC LIMIT 100`, tenantID)
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var publicID, tenantName, event, status string
+		var publicID, tenantName, event, status, deliveryStatus string
 		var createdAt time.Time
-		if err := rows.Scan(&publicID, &tenantName, &event, &status, &createdAt); err != nil {
+		if err := rows.Scan(&publicID, &tenantName, &event, &status, &deliveryStatus, &createdAt); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 			return
 		}
-		items = append(items, map[string]any{"public_id": publicID, "tenant": tenantName, "event": event, "status": status, "created_at": createdAt})
+		items = append(items, map[string]any{"public_id": publicID, "tenant": tenantName, "event": event, "status": status, "delivery_status": deliveryStatus, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }

@@ -5,7 +5,7 @@ The platform is a modular monolith split into two deployable projects:
 - `notification-core-api`: Go API and worker binaries.
 - `notification-admin-ui`: React dashboard for platform and tenant users.
 
-Shared state lives in PostgreSQL, Redis, and RabbitMQ. API processes are stateless. Queue-specific workers can be scaled independently with Docker Compose, for example `docker compose up -d --scale worker-sms=5`.
+Shared state lives in PostgreSQL, Redis, and RabbitMQ. API processes are stateless. Queue-specific workers can be scaled independently with Docker Compose, for example `docker compose --profile all up -d --scale worker-sms=5`.
 
 The main send path is:
 
