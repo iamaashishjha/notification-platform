@@ -127,7 +127,10 @@ export function SendNotificationPage() {
 
   return (
     <Panel title="Send Notification">
-      <form onSubmit={submit} className="max-w-2xl space-y-4">
+      <div className="mb-6 border-b border-slate-200 pb-5"><p className="text-sm leading-6 text-slate-600">Compose a transactional notification, select its audience and delivery channels, then send immediately or schedule it for later.</p></div>
+      <form onSubmit={submit} className="grid items-start gap-6 xl:grid-cols-2">
+        <section className="space-y-4 rounded-lg border border-slate-200 p-5">
+          <div><h3 className="font-semibold text-slate-900">Recipient and delivery</h3><p className="mt-1 text-sm text-slate-500">Choose who receives this notification and how it is delivered.</p></div>
         {isPlatform ? (
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Tenant</span>
@@ -200,6 +203,9 @@ export function SendNotificationPage() {
           </>
         )}
 
+        </section>
+        <section className="space-y-4 rounded-lg border border-slate-200 p-5">
+          <div><h3 className="font-semibold text-slate-900">Message and scheduling</h3><p className="mt-1 text-sm text-slate-500">Define the event payload, delivery priority, and timing.</p></div>
         <label className="block text-sm">
           <span className="mb-1 block font-medium">Event</span>
           <input value={event} onChange={(e) => setEvent(e.target.value)} placeholder="e.g. order.confirmed" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required />
@@ -226,6 +232,7 @@ export function SendNotificationPage() {
             {sending ? 'Sending...' : 'Queue Notification'}
           </button>
         )}
+        </section>
       </form>
     </Panel>
   );

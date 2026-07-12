@@ -20,3 +20,126 @@ button, input, select, textarea {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
+
+/* Templates workspace: explicit component CSS keeps complex overlays and controls
+   stable during Vite/Tailwind hot reloads. */
+.template-modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.template-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgb(15 23 42 / 0.56);
+  backdrop-filter: blur(3px);
+}
+
+.template-modal-panel {
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-height: 92vh;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #dbe2ea;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 24px 60px rgb(15 23 42 / 0.24), 0 4px 12px rgb(15 23 42 / 0.08);
+}
+
+.template-modal-panel.max-w-md { max-width: 448px; }
+.template-modal-panel.max-w-3xl { max-width: 768px; }
+
+.template-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.template-search-control { flex: 1 1 420px; min-width: 240px; }
+.template-filter-control { flex: 0 0 180px; }
+.template-tenant-control { flex-basis: 230px; }
+
+.template-search-control > label,
+.template-filter-control > label {
+  display: block;
+  margin-bottom: 6px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .045em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.template-control-input,
+.template-control-select {
+  position: relative;
+  display: flex;
+  height: 38px;
+  align-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #64748b;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.template-control-input:focus-within,
+.template-control-select:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / .1);
+}
+
+.template-control-input > svg { margin-left: 11px; flex: 0 0 auto; }
+.template-control-input input,
+.template-control-select select {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #1e293b;
+  font-size: 13px;
+}
+.template-control-input input { padding: 0 11px 0 8px; }
+.template-control-select select { appearance: none; padding: 0 34px 0 11px; }
+.template-control-select > svg { position: absolute; right: 10px; pointer-events: none; }
+.template-control-input input::placeholder { color: #94a3b8; }
+
+.template-clear-filters {
+  height: 38px;
+  flex: 0 0 auto;
+  padding: 0 4px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+.template-clear-filters:hover { color: #2563eb; }
+
+@media (max-width: 900px) {
+  .template-toolbar { flex-wrap: wrap; }
+  .template-search-control { flex-basis: 100%; }
+  .template-filter-control { flex: 1 1 180px; }
+}
+
+@media (max-width: 640px) {
+  .template-modal-root { padding: 0; }
+  .template-modal-panel { max-height: 100vh; height: 100%; border-radius: 0; }
+  .template-toolbar { align-items: stretch; }
+  .template-filter-control { flex-basis: 100%; }
+}

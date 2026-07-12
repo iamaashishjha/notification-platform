@@ -122,7 +122,7 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 	// Campaigns
 	mux.Handle("GET /admin/api/v1/campaigns", middleware.Chain(authSvc, "campaigns.view", h.ListCampaigns))
 	mux.Handle("POST /admin/api/v1/campaigns", middleware.Chain(authSvc, "campaigns.create", h.CreateCampaign))
-	mux.Handle("PUT /admin/api/v1/campaigns/{id}", middleware.Chain(authSvc, "campaigns.view", h.UpdateCampaign))
+	mux.Handle("PUT /admin/api/v1/campaigns/{id}", middleware.Chain(authSvc, "campaigns.update", h.UpdateCampaign))
 	mux.Handle("POST /admin/api/v1/campaigns/{id}/approve", middleware.Chain(authSvc, "campaigns.approve", h.ApproveCampaign))
 	mux.Handle("POST /admin/api/v1/campaigns/{id}/send", middleware.Chain(authSvc, "campaigns.send", h.SendCampaign))
 	mux.Handle("POST /admin/api/v1/campaigns/{id}/cancel", middleware.Chain(authSvc, "campaigns.cancel", h.CancelCampaign))

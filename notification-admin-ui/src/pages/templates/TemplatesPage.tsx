@@ -1,163 +1,319 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { useAuth } from '../../auth/AuthContext';
-import { Plus, Trash2, Pencil, X, Eye } from 'lucide-react';
+import {
+  AlertTriangle,
+  Braces,
+  CheckCircle2,
+  ChevronDown,
+  Eye,
+  FileText,
+  Mail,
+  MessageSquare,
+  Pencil,
+  Plus,
+  Search,
+  Smartphone,
+  Trash2,
+  X,
+} from 'lucide-react';
 
-type Template = { id: string; tenant_id: string; tenant_name?: string; template_key: string; channel: string; subject: string; body: string; status: string; created_at: string };
+type Template = {
+  id: string;
+  tenant_id: string;
+  tenant_name?: string;
+  template_key: string;
+  channel: string;
+  subject: string;
+  body: string;
+  status: string;
+  created_at: string;
+};
+
+type Tenant = { id: string; name: string; status: string };
+type ModalState =
+  | { mode: 'create' }
+  | { mode: 'view'; template: Template }
+  | { mode: 'edit'; template: Template }
+  | { mode: 'delete'; template: Template }
+  | null;
+
+type FormValues = {
+  tenantId: string;
+  templateKey: string;
+  channel: string;
+  subject: string;
+  body: string;
+};
+
+const emptyForm: FormValues = { tenantId: '', templateKey: '', channel: 'email', subject: '', body: '' };
+
+function Modal({ title, description, children, onClose, width = 'max-w-3xl' }: { title: string; description?: string; children: ReactNode; onClose: () => void; width?: string }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
+    document.addEventListener('keydown', closeOnEscape);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="template-modal-root" role="dialog" aria-modal="true" aria-label={title}>
+      <button className="template-modal-backdrop" onClick={onClose} aria-label="Close modal" />
+      <section className={`template-modal-panel ${width}`}>
+        <header className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight text-slate-900">{title}</h2>
+            {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+          </div>
+          <button onClick={onClose} className="focus-ring rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Close">
+            <X size={19} />
+          </button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function ChannelBadge({ channel }: { channel: string }) {
+  const config: Record<string, { icon: ReactNode; classes: string }> = {
+    email: { icon: <Mail size={13} />, classes: 'bg-blue-50 text-blue-700 ring-blue-600/20' },
+    sms: { icon: <MessageSquare size={13} />, classes: 'bg-violet-50 text-violet-700 ring-violet-600/20' },
+    fcm: { icon: <Smartphone size={13} />, classes: 'bg-amber-50 text-amber-700 ring-amber-600/20' },
+  };
+  const item = config[channel] ?? { icon: <FileText size={13} />, classes: 'bg-slate-50 text-slate-700 ring-slate-600/20' };
+  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${item.classes}`}>{item.icon}{channel}</span>;
+}
 
 export function TemplatesPage() {
   const { user, can } = useAuth();
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<Template[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [templateKey, setTemplateKey] = useState('');
-  const [channel, setChannel] = useState('email');
-  const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
-  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
   const [tenantFilter, setTenantFilter] = useState('');
+  const [channelFilter, setChannelFilter] = useState('');
+  const [modal, setModal] = useState<ModalState>(null);
+  const [form, setForm] = useState<FormValues>(emptyForm);
 
-  const load = () => {
+  function load() {
     setLoading(true);
-    list<Template>('/admin/api/v1/templates' + (tenantFilter ? `?tenant_id=${tenantFilter}` : ''))
+    setError('');
+    const endpoint = '/admin/api/v1/templates' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : '');
+    list<Template>(endpoint)
       .then((res) => setItems(res.data))
-      .catch((err) => setError(err.message)).finally(() => setLoading(false));
-  };
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }
 
-  useEffect(() => { load(); }, [tenantFilter]);
+  useEffect(load, [tenantFilter]);
+  useEffect(() => {
+    if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((res) => setTenants(res.data)).catch(() => undefined);
+  }, [isPlatform]);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setSaving(true); setError(''); setMessage('');
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return items.filter((item) => {
+      const matchesSearch = !query || [item.template_key, item.subject, item.tenant_name, item.body].some((value) => value?.toLowerCase().includes(query));
+      return matchesSearch && (!channelFilter || item.channel === channelFilter);
+    });
+  }, [items, search, channelFilter]);
+
+  function openCreate() {
+    setForm({ ...emptyForm, tenantId: tenantFilter });
+    setError('');
+    setModal({ mode: 'create' });
+  }
+
+  function openEdit(template: Template) {
+    setForm({ tenantId: template.tenant_id, templateKey: template.template_key, channel: template.channel || 'email', subject: template.subject || '', body: template.body || '' });
+    setError('');
+    setModal({ mode: 'edit', template });
+  }
+
+  async function saveTemplate(event: FormEvent) {
+    event.preventDefault();
+    if (!form.templateKey.trim() || !form.channel || !form.body.trim() || (isPlatform && modal?.mode === 'create' && !form.tenantId)) {
+      setError('Complete all required fields before saving.');
+      return;
+    }
+    setSaving(true);
+    setError('');
     try {
-      await apiRequest('/admin/api/v1/templates', { method: 'POST', body: JSON.stringify({ template_key: templateKey, channel, subject, body }) });
-      setTemplateKey(''); setChannel('email'); setSubject(''); setBody('');
-      setShowForm(false);
-      setMessage('Template created');
+      const payload = { tenant_id: form.tenantId, template_key: form.templateKey.trim(), channel: form.channel, subject: form.subject.trim(), body: form.body };
+      if (modal?.mode === 'edit') {
+        await apiRequest(`/admin/api/v1/templates/${modal.template.id}`, { method: 'PUT', body: JSON.stringify(payload) });
+        setMessage('Template updated successfully.');
+      } else {
+        await apiRequest('/admin/api/v1/templates', { method: 'POST', body: JSON.stringify(payload) });
+        setMessage('Template created successfully.');
+      }
+      setModal(null);
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Create failed'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save template.');
+    } finally {
+      setSaving(false);
+    }
   }
 
-  async function remove(id: string) {
-    if (!confirm('Delete this template?')) return;
+  async function removeTemplate(template: Template) {
+    setSaving(true);
+    setError('');
     try {
-      await apiRequest(`/admin/api/v1/templates/${id}`, { method: 'DELETE' });
+      await apiRequest(`/admin/api/v1/templates/${template.id}`, { method: 'DELETE' });
+      setModal(null);
+      setMessage(`Template “${template.template_key}” was deleted.`);
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Delete failed'); }
-  }
-
-  function startEdit(item: Template) {
-    setEditingId(item.id);
-    setTemplateKey(item.template_key);
-    setChannel(item.channel || 'email');
-    setSubject(item.subject || '');
-    setBody(item.body || '');
-  }
-
-  async function saveEdit(id: string) {
-    setSaving(true); setError('');
-    try {
-      await apiRequest(`/admin/api/v1/templates/${id}`, { method: 'PUT', body: JSON.stringify({ template_key: templateKey, channel, subject, body }) });
-      setEditingId(null); setMessage('Template updated'); load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Update failed'); }
-    finally { setSaving(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to delete template.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <Panel title="Templates" actions={can('templates.create') ? <button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Add Template</>}</button> : undefined}>
-      {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
-
-      {showForm && (
-        <form onSubmit={submit} className="mb-6 max-w-lg space-y-3 rounded-md border border-slate-200 p-4">
-          <input value={templateKey} onChange={(e) => setTemplateKey(e.target.value)} placeholder="Template key (e.g. order_confirmation)" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <select value={channel} onChange={(e) => setChannel(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
-            <option value="email">Email</option><option value="sms">SMS</option><option value="fcm">FCM</option>
-          </select>
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Body" rows={4} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <button disabled={saving} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{saving ? 'Saving...' : 'Create'}</button>
-        </form>
-      )}
-
-      {isPlatform && (
-        <label className="mb-4 block text-sm">
-          <span className="mb-1 block font-medium">Tenant Filter</span>
-          <input value={tenantFilter} onChange={(e) => setTenantFilter(e.target.value)} placeholder="Filter by tenant ID" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-        </label>
-      )}
-
-      {loading ? (
-        <div className="py-8 text-center text-slate-400">Loading...</div>
-      ) : items.length === 0 ? (
-        <div className="py-8 text-center text-slate-400">No templates found</div>
-      ) : (
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-slate-200 text-slate-500">
-            <tr><th className="py-2">Key</th>{isPlatform && <th>Tenant</th>}<th>Channel</th><th>Subject</th><th>Status</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.id} className="border-b border-slate-100">
-                {editingId === item.id ? (
-                  <>
-                    <td className="py-3"><input value={templateKey} onChange={(e) => setTemplateKey(e.target.value)} className="w-32 rounded border px-2 py-1 text-xs" /></td>
-                    {isPlatform && <td>{item.tenant_name || '-'}</td>}
-                    <td><select value={channel} onChange={(e) => setChannel(e.target.value)} className="rounded border px-2 py-1 text-xs"><option value="email">Email</option><option value="sms">SMS</option><option value="fcm">FCM</option></select></td>
-                    <td><input value={subject} onChange={(e) => setSubject(e.target.value)} className="w-32 rounded border px-2 py-1 text-xs" /></td>
-                    <td>{item.status}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        <button onClick={() => saveEdit(item.id)} disabled={saving} className="rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50">Save</button>
-                        <button onClick={() => setEditingId(null)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"><X size={12} />Cancel</button>
-                      </div>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td className="py-3 font-medium">{item.template_key}</td>
-                    {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
-                    <td>{item.channel || '-'}</td>
-                    <td>{item.subject || '-'}</td>
-                    <td>{item.status}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        <button onClick={() => setViewingId(viewingId === item.id ? null : item.id)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />{viewingId === item.id ? 'Hide' : 'View'}</button>
-                        {can('templates.update') && <button onClick={() => startEdit(item)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Pencil size={12} />Edit</button>}
-                        {can('templates.delete') && <button onClick={() => remove(item.id)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={12} />Delete</button>}
-                      </div>
-                    </td>
-                  </>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {viewingId && items.find((i) => i.id === viewingId) && (
-        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-          <h3 className="mb-2 font-semibold">Template Preview</h3>
-          {(() => {
-            const t = items.find((i) => i.id === viewingId)!;
-            return (
-              <div className="space-y-2">
-                <div><span className="text-slate-500">Key:</span> {t.template_key}</div>
-                <div><span className="text-slate-500">Channel:</span> {t.channel}</div>
-                <div><span className="text-slate-500">Subject:</span> {t.subject || '-'}</div>
-                <div><span className="text-slate-500">Body:</span><pre className="mt-1 whitespace-pre-wrap rounded bg-white p-2 font-mono text-xs">{t.body || '-'}</pre></div>
-              </div>
-            );
-          })()}
+    <>
+      <Panel
+        title="Templates"
+        actions={can('templates.create') ? (
+          <button onClick={openCreate} className="focus-ring inline-flex items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+            <Plus size={16} /> New template
+          </button>
+        ) : undefined}
+      >
+        <div className="mb-5 flex flex-col gap-1">
+          <p className="text-sm text-slate-500">Manage reusable content for every notification channel and tenant.</p>
         </div>
+
+        {error && !modal && <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{error}</div>}
+        {message && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><CheckCircle2 size={16} />{message}</div>}
+
+        <div className="template-toolbar">
+          <div className="template-search-control">
+            <label htmlFor="template-search">Search templates</label>
+            <div className="template-control-input">
+              <Search aria-hidden="true" size={16} />
+              <input id="template-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Key, subject, tenant, or content" />
+            </div>
+          </div>
+          <div className="template-filter-control">
+            <label htmlFor="template-channel">Channel</label>
+            <div className="template-control-select">
+              <select id="template-channel" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}>
+                <option value="">All channels</option><option value="email">Email</option><option value="sms">SMS</option><option value="fcm">FCM</option>
+              </select>
+              <ChevronDown aria-hidden="true" size={15} />
+            </div>
+          </div>
+          {isPlatform && (
+            <div className="template-filter-control template-tenant-control">
+              <label htmlFor="template-tenant">Tenant</label>
+              <div className="template-control-select">
+                <select id="template-tenant" value={tenantFilter} onChange={(e) => setTenantFilter(e.target.value)}>
+                  <option value="">All tenants</option>
+                  {tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
+                </select>
+                <ChevronDown aria-hidden="true" size={15} />
+              </div>
+            </div>
+          )}
+          {(search || channelFilter || tenantFilter) && (
+            <button className="template-clear-filters" onClick={() => { setSearch(''); setChannelFilter(''); setTenantFilter(''); }}>Clear filters</button>
+          )}
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[850px] text-left text-sm">
+              <thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr><th className="px-4 py-3">Template</th>{isPlatform && <th className="px-4 py-3">Tenant</th>}<th className="px-4 py-3">Channel</th><th className="px-4 py-3">Subject</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {loading ? (
+                  <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-16 text-center text-slate-400">Loading templates…</td></tr>
+                ) : filteredItems.length === 0 ? (
+                  <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-16 text-center"><FileText className="mx-auto mb-3 text-slate-300" size={30} /><p className="font-medium text-slate-600">No templates found</p><p className="mt-1 text-xs text-slate-400">Try changing your filters or create a new template.</p></td></tr>
+                ) : filteredItems.map((item) => (
+                  <tr key={item.id} className="group hover:bg-slate-50/70">
+                    <td className="px-4 py-3.5"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500"><Braces size={17} /></span><div><div className="font-semibold text-slate-800">{item.template_key}</div><div className="mt-0.5 text-xs text-slate-400">Updated template</div></div></div></td>
+                    {isPlatform && <td className="px-4 py-3.5 text-slate-600">{item.tenant_name || '—'}</td>}
+                    <td className="px-4 py-3.5"><ChannelBadge channel={item.channel} /></td>
+                    <td className="max-w-xs truncate px-4 py-3.5 text-slate-600">{item.subject || <span className="text-slate-400">No subject</span>}</td>
+                    <td className="px-4 py-3.5"><span className="inline-flex items-center gap-1.5 text-xs font-medium capitalize text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{item.status}</span></td>
+                    <td className="px-4 py-3.5"><div className="flex justify-end gap-1">
+                      <button onClick={() => setModal({ mode: 'view', template: item })} className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100" title="View template"><Eye size={14} /> View</button>
+                      {can('templates.update') && <button onClick={() => openEdit(item)} className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50" title="Edit template"><Pencil size={14} /> Edit</button>}
+                      {can('templates.delete') && <button onClick={() => setModal({ mode: 'delete', template: item })} className="focus-ring rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete template"><Trash2 size={15} /></button>}
+                    </div></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!loading && filteredItems.length > 0 && <div className="border-t border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-500">Showing {filteredItems.length} of {items.length} templates</div>}
+        </div>
+      </Panel>
+
+      {(modal?.mode === 'create' || modal?.mode === 'edit') && (
+        <Modal title={modal.mode === 'create' ? 'Create notification template' : 'Edit notification template'} description={modal.mode === 'create' ? 'Build reusable content with variables such as {{customer_name}}.' : `Editing ${modal.template.template_key}`} onClose={() => setModal(null)}>
+          <form onSubmit={saveTemplate}>
+            <div className="max-h-[calc(92vh-160px)] space-y-5 overflow-y-auto px-6 py-5">
+              {error && <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"><AlertTriangle className="mt-0.5 shrink-0" size={15} />{error}</div>}
+              {isPlatform && modal.mode === 'create' && <FormField label="Tenant" required hint="The tenant that owns this template."><select value={form.tenantId} onChange={(e) => setForm({ ...form, tenantId: e.target.value })} className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm" required><option value="">Select a tenant</option>{tenants.filter((tenant) => tenant.status === 'active').map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></FormField>}
+              <div className="grid gap-5 md:grid-cols-2">
+                <FormField label="Template key" required hint="Stable identifier used by the API."><input value={form.templateKey} onChange={(e) => setForm({ ...form, templateKey: e.target.value })} placeholder="order_confirmation" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm" required /></FormField>
+                <FormField label="Channel" required hint="Delivery channel for this content."><select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm" required><option value="email">Email</option><option value="sms">SMS</option><option value="fcm">FCM push</option></select></FormField>
+              </div>
+              <FormField label="Subject" hint={form.channel === 'email' ? 'Email subject line. Variables are supported.' : 'Optional for this channel.'}><input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Your order {{order_id}} is confirmed" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></FormField>
+              <FormField label="Message body" required hint="Use double braces for variables, for example {{customer_name}}."><textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={9} placeholder="Hello {{customer_name}},\n\nYour notification content goes here." className="focus-ring w-full resize-y rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm leading-6" required /></FormField>
+            </div>
+            <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><button type="button" onClick={() => setModal(null)} className="focus-ring rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button><button disabled={saving} className="focus-ring rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60">{saving ? 'Saving…' : modal.mode === 'create' ? 'Create template' : 'Save changes'}</button></footer>
+          </form>
+        </Modal>
       )}
-    </Panel>
+
+      {modal?.mode === 'view' && <TemplatePreview template={modal.template} onClose={() => setModal(null)} onEdit={can('templates.update') ? () => openEdit(modal.template) : undefined} />}
+
+      {modal?.mode === 'delete' && (
+        <Modal title="Delete template" description="This action cannot be undone." onClose={() => setModal(null)} width="max-w-md">
+          <div className="px-6 py-5"><div className="flex gap-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600"><AlertTriangle size={20} /></span><p className="text-sm leading-6 text-slate-600">Delete <strong className="font-semibold text-slate-900">{modal.template.template_key}</strong>? Applications using this key may no longer be able to send notifications.</p></div></div>
+          {error && <div className="mx-6 mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><button onClick={() => setModal(null)} className="focus-ring rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button><button onClick={() => removeTemplate(modal.template)} disabled={saving} className="focus-ring rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60">{saving ? 'Deleting…' : 'Delete template'}</button></footer>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function FormField({ label, hint, required, children }: { label: string; hint?: string; required?: boolean; children: ReactNode }) {
+  return <label className="block"><span className="mb-1.5 block text-sm font-medium text-slate-700">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>{children}{hint && <span className="mt-1.5 block text-xs text-slate-500">{hint}</span>}</label>;
+}
+
+function TemplatePreview({ template, onClose, onEdit }: { template: Template; onClose: () => void; onEdit?: () => void }) {
+  return (
+    <Modal title={template.template_key} description="Template details and rendered content preview." onClose={onClose}>
+      <div className="max-h-[calc(92vh-160px)] overflow-y-auto px-6 py-5">
+        <dl className="mb-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
+          <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Channel</dt><dd className="mt-2"><ChannelBadge channel={template.channel} /></dd></div>
+          <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Tenant</dt><dd className="mt-2 text-sm font-medium text-slate-700">{template.tenant_name || 'Current tenant'}</dd></div>
+          <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</dt><dd className="mt-2 text-sm font-medium capitalize text-emerald-700">{template.status}</dd></div>
+        </dl>
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          {template.subject && <div className="border-b border-slate-200 bg-white px-5 py-4"><div className="text-xs font-medium uppercase tracking-wide text-slate-400">Subject</div><div className="mt-1.5 font-medium text-slate-800">{template.subject}</div></div>}
+          <div className="bg-white px-5 py-5"><div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Message body</div><pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">{template.body || 'No content'}</pre></div>
+        </div>
+      </div>
+      <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><button onClick={onClose} className="focus-ring rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Close</button>{onEdit && <button onClick={onEdit} className="focus-ring inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"><Pencil size={15} />Edit template</button>}</footer>
+    </Modal>
   );
 }

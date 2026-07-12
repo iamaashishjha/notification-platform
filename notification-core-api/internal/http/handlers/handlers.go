@@ -11,10 +11,10 @@ import (
 	"notification-core-api/internal/auth"
 	httpmw "notification-core-api/internal/http/middleware"
 	"notification-core-api/internal/notifications"
+	"notification-core-api/internal/providers"
 	emailpkg "notification-core-api/internal/providers/email"
 	fcmpkg "notification-core-api/internal/providers/fcm"
 	smspkg "notification-core-api/internal/providers/sms"
-	"notification-core-api/internal/providers"
 	"notification-core-api/internal/security"
 	ws "notification-core-api/internal/websocket"
 
@@ -289,7 +289,7 @@ func (h Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 	if !p.IsPlatform {
 		retryQuery += ` AND tenant_id = $1`
 		deadQuery += ` AND tenant_id = $1`
-	}	
+	}
 	_ = h.db.QueryRow(r.Context(), retryQuery, tenantArgs...).Scan(&retryCount)
 	_ = h.db.QueryRow(r.Context(), deadQuery, tenantArgs...).Scan(&deadCount)
 
@@ -534,7 +534,7 @@ func (h Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListFeatures(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT tf.id::text, tf.feature_key, tf.enabled, COALESCE(t.name,''), tf.created_at FROM tenant_features tf JOIN tenants t ON t.id = tf.tenant_id`
+	q := `SELECT tf.id::text, tf.feature_key, fc.name, fc.description, fc.category, tf.enabled, COALESCE(t.name,''), tf.created_at FROM tenant_features tf JOIN tenants t ON t.id = tf.tenant_id JOIN feature_catalog fc ON fc.identifier = tf.feature_key`
 	args := []any{}
 	if !p.IsPlatform {
 		q += ` WHERE tf.tenant_id = $1`
@@ -549,14 +549,14 @@ func (h Handler) ListFeatures(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, key, tenantName string
+		var id, key, name, description, category, tenantName string
 		var enabled bool
 		var createdAt time.Time
-		if err := rows.Scan(&id, &key, &enabled, &tenantName, &createdAt); err != nil {
+		if err := rows.Scan(&id, &key, &name, &description, &category, &enabled, &tenantName, &createdAt); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 			return
 		}
-		items = append(items, map[string]any{"id": id, "feature_key": key, "enabled": enabled, "tenant_name": tenantName, "created_at": createdAt})
+		items = append(items, map[string]any{"id": id, "identifier": key, "feature_key": key, "name": name, "description": description, "category": category, "enabled": enabled, "tenant_name": tenantName, "created_at": createdAt})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }
@@ -697,15 +697,23 @@ func (h Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	argN := 1
 	if req.Name != "" {
-		q += ", name = $" + itoa(argN); args = append(args, req.Name); argN++
+		q += ", name = $" + itoa(argN)
+		args = append(args, req.Name)
+		argN++
 	}
 	if req.Email != "" {
-		q += ", email = $" + itoa(argN); args = append(args, req.Email); argN++
+		q += ", email = $" + itoa(argN)
+		args = append(args, req.Email)
+		argN++
 	}
 	if req.Status != "" {
-		q += ", status = $" + itoa(argN); args = append(args, req.Status); argN++
+		q += ", status = $" + itoa(argN)
+		args = append(args, req.Status)
+		argN++
 	}
-	q += " WHERE id = $" + itoa(argN); args = append(args, id); argN++
+	q += " WHERE id = $" + itoa(argN)
+	args = append(args, id)
+	argN++
 	if !p.IsPlatform {
 		q += " AND EXISTS (SELECT 1 FROM tenant_users WHERE user_id = $" + itoa(argN) + " AND tenant_id = $" + itoa(argN+1) + ")"
 		args = append(args, id, p.TenantID)
@@ -756,11 +764,11 @@ func (h Handler) UpdateFeature(w http.ResponseWriter, r *http.Request) {
 func (h Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Enabled            *bool `json:"enabled"`
+		Enabled            *bool  `json:"enabled"`
 		Direction          string `json:"direction"`
-		RateLimitPerSecond *int  `json:"rate_limit_per_second"`
-		DailyQuota         *int  `json:"daily_quota"`
-		Priority           *int  `json:"priority"`
+		RateLimitPerSecond *int   `json:"rate_limit_per_second"`
+		DailyQuota         *int   `json:"daily_quota"`
+		Priority           *int   `json:"priority"`
 	}
 	if decode(w, r, &req) != nil {
 		return
@@ -770,23 +778,37 @@ func (h Handler) UpdateChannel(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	argN := 1
 	if req.Enabled != nil {
-		q += ", enabled = $" + itoa(argN); args = append(args, *req.Enabled); argN++
+		q += ", enabled = $" + itoa(argN)
+		args = append(args, *req.Enabled)
+		argN++
 	}
 	if req.Direction != "" {
-		q += ", direction = $" + itoa(argN); args = append(args, req.Direction); argN++
+		q += ", direction = $" + itoa(argN)
+		args = append(args, req.Direction)
+		argN++
 	}
 	if req.RateLimitPerSecond != nil {
-		q += ", rate_limit_per_second = $" + itoa(argN); args = append(args, *req.RateLimitPerSecond); argN++
+		q += ", rate_limit_per_second = $" + itoa(argN)
+		args = append(args, *req.RateLimitPerSecond)
+		argN++
 	}
 	if req.DailyQuota != nil {
-		q += ", daily_quota = $" + itoa(argN); args = append(args, *req.DailyQuota); argN++
+		q += ", daily_quota = $" + itoa(argN)
+		args = append(args, *req.DailyQuota)
+		argN++
 	}
 	if req.Priority != nil {
-		q += ", priority = $" + itoa(argN); args = append(args, *req.Priority); argN++
+		q += ", priority = $" + itoa(argN)
+		args = append(args, *req.Priority)
+		argN++
 	}
-	q += " WHERE id = $" + itoa(argN); args = append(args, id); argN++
+	q += " WHERE id = $" + itoa(argN)
+	args = append(args, id)
+	argN++
 	if !p.IsPlatform {
-		q += " AND tenant_id = $" + itoa(argN); args = append(args, p.TenantID); argN++
+		q += " AND tenant_id = $" + itoa(argN)
+		args = append(args, p.TenantID)
+		argN++
 	}
 	result, err := h.db.Exec(r.Context(), q, args...)
 	if err != nil {
@@ -929,13 +951,19 @@ func (h Handler) UpdateProviderConfig(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	argN := 1
 	if req.Provider != "" {
-		q += ", provider = $" + itoa(argN); args = append(args, req.Provider); argN++
+		q += ", provider = $" + itoa(argN)
+		args = append(args, req.Provider)
+		argN++
 	}
 	if req.IsDefault != nil {
-		q += ", is_default = $" + itoa(argN); args = append(args, *req.IsDefault); argN++
+		q += ", is_default = $" + itoa(argN)
+		args = append(args, *req.IsDefault)
+		argN++
 	}
 	if req.Status != "" {
-		q += ", status = $" + itoa(argN); args = append(args, req.Status); argN++
+		q += ", status = $" + itoa(argN)
+		args = append(args, req.Status)
+		argN++
 	}
 	if req.ConfigJSON != "" {
 		encrypted, err := security.Encrypt(req.ConfigJSON)
@@ -943,11 +971,17 @@ func (h Handler) UpdateProviderConfig(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "encryption failed"})
 			return
 		}
-		q += ", config_json = $" + itoa(argN) + "::jsonb"; args = append(args, encrypted); argN++
+		q += ", config_json = $" + itoa(argN) + "::jsonb"
+		args = append(args, encrypted)
+		argN++
 	}
-	q += " WHERE id = $" + itoa(argN); args = append(args, id); argN++
+	q += " WHERE id = $" + itoa(argN)
+	args = append(args, id)
+	argN++
 	if !p.IsPlatform {
-		q += " AND tenant_id = $" + itoa(argN); args = append(args, p.TenantID); argN++
+		q += " AND tenant_id = $" + itoa(argN)
+		args = append(args, p.TenantID)
+		argN++
 	}
 	result, err := h.db.Exec(r.Context(), q, args...)
 	if err != nil {
@@ -1455,15 +1489,15 @@ func (h Handler) GetTenantOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	features := []map[string]any{}
-	fRows, fErr := h.db.Query(r.Context(), `SELECT id::text, feature_key, enabled, created_at FROM tenant_features WHERE tenant_id = $1 ORDER BY feature_key`, tenantID)
+	fRows, fErr := h.db.Query(r.Context(), `SELECT tf.id::text, tf.feature_key, fc.name, fc.description, fc.category, tf.enabled, tf.created_at FROM tenant_features tf JOIN feature_catalog fc ON fc.identifier = tf.feature_key WHERE tf.tenant_id = $1 ORDER BY fc.category, fc.name`, tenantID)
 	if fErr == nil {
 		defer fRows.Close()
 		for fRows.Next() {
-			var fid, fkey string
+			var fid, fkey, fname, fdescription, fcategory string
 			var fenabled bool
 			var fcreatedAt time.Time
-			if fRows.Scan(&fid, &fkey, &fenabled, &fcreatedAt) == nil {
-				features = append(features, map[string]any{"id": fid, "feature_key": fkey, "enabled": fenabled, "created_at": fcreatedAt})
+			if fRows.Scan(&fid, &fkey, &fname, &fdescription, &fcategory, &fenabled, &fcreatedAt) == nil {
+				features = append(features, map[string]any{"id": fid, "identifier": fkey, "feature_key": fkey, "name": fname, "description": fdescription, "category": fcategory, "enabled": fenabled, "created_at": fcreatedAt})
 			}
 		}
 	}
@@ -1611,27 +1645,21 @@ func (h Handler) UpdateTenantSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListFeatureCatalog(w http.ResponseWriter, r *http.Request) {
 	type CatalogItem struct {
+		Identifier  string `json:"identifier"`
 		FeatureKey  string `json:"feature_key"`
+		Name        string `json:"name"`
 		Description string `json:"description"`
+		Category    string `json:"category"`
 		TenantCount int    `json:"tenant_count"`
 	}
 	rows, err := h.db.Query(r.Context(), `
-		WITH platform_features (feature_key, description) AS (VALUES
-			('contacts.enabled','Manage contact address book'),
-			('groups.enabled','Organize contacts into groups'),
-			('templates.enabled','Define reusable notification templates'),
-			('campaigns.enabled','Create and manage notification campaigns'),
-			('schedule.enabled','Schedule notifications for future delivery'),
-			('api_access.enabled','API key authentication for programmatic access'),
-			('admin_send.enabled','Manual notification send from admin panel'),
-			('audit.enabled','Track all configuration changes'),
-			('approval_flow.enabled','Campaign approval workflow'),
-			('bulk_import.enabled','Bulk import contacts'),
-			('in_app.enabled','In-app notification center')
-		)
-		SELECT pf.feature_key, pf.description,
-			COALESCE((SELECT COUNT(*) FROM tenant_features tf WHERE tf.feature_key = pf.feature_key), 0) AS tenant_count
-		FROM platform_features pf ORDER BY pf.feature_key`)
+		SELECT fc.identifier, fc.identifier, fc.name, fc.description, fc.category,
+			COUNT(tf.id) FILTER (WHERE tf.enabled) AS tenant_count
+		FROM feature_catalog fc
+		LEFT JOIN tenant_features tf ON tf.feature_key = fc.identifier
+		WHERE fc.status = 'active'
+		GROUP BY fc.identifier, fc.name, fc.description, fc.category
+		ORDER BY fc.category, fc.name`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
 		return
@@ -1640,7 +1668,7 @@ func (h Handler) ListFeatureCatalog(w http.ResponseWriter, r *http.Request) {
 	var out []CatalogItem
 	for rows.Next() {
 		var item CatalogItem
-		if err := rows.Scan(&item.FeatureKey, &item.Description, &item.TenantCount); err != nil {
+		if err := rows.Scan(&item.Identifier, &item.FeatureKey, &item.Name, &item.Description, &item.Category, &item.TenantCount); err != nil {
 			continue
 		}
 		out = append(out, item)

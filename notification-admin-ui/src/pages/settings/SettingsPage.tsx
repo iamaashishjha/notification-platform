@@ -75,8 +75,12 @@ export function SettingsPage() {
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
 
+      <div className="mb-6 border-b border-slate-200 pb-5">
+        <p className="text-sm leading-6 text-slate-600">Configure tenant-wide localization, sender identities, and customer-facing branding. These defaults are applied when a notification does not provide an explicit override.</p>
+      </div>
+
       {isPlatform && (
-        <label className="mb-4 block text-sm">
+        <label className="mb-5 block max-w-xl text-sm">
           <span className="mb-1 block font-medium">Tenant</span>
           <select value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
             {tenants.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>)}
@@ -87,9 +91,10 @@ export function SettingsPage() {
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading settings...</div>
       ) : (
-        <form onSubmit={submit} className="max-w-2xl space-y-4">
-          <div className="rounded-md border border-slate-200 p-4">
-            <h3 className="mb-3 text-sm font-medium">General</h3>
+        <form onSubmit={submit} className="grid gap-5 xl:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 p-5">
+            <h3 className="text-base font-semibold text-slate-900">Regional settings</h3>
+            <p className="mb-4 mt-1 text-sm text-slate-500">Control how dates, times, and regional content are interpreted.</p>
             <div className="space-y-3">
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Timezone</span>
@@ -115,8 +120,9 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200 p-4">
-            <h3 className="mb-3 text-sm font-medium">Notification Defaults</h3>
+          <div className="rounded-lg border border-slate-200 p-5">
+            <h3 className="text-base font-semibold text-slate-900">Sender identities</h3>
+            <p className="mb-4 mt-1 text-sm text-slate-500">Default identities recipients see when messages are delivered.</p>
             <div className="space-y-3">
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Default Email Sender</span>
@@ -129,8 +135,9 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-slate-200 p-4">
-            <h3 className="mb-3 text-sm font-medium">Branding</h3>
+          <div className="rounded-lg border border-slate-200 p-5">
+            <h3 className="text-base font-semibold text-slate-900">Branding</h3>
+            <p className="mb-4 mt-1 text-sm text-slate-500">Apply tenant branding to supported notification experiences.</p>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Logo URL</span>
               <input value={brandingLogo} onChange={(e) => setBrandingLogo(e.target.value)} placeholder="https://example.com/logo.png" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" />
@@ -138,8 +145,9 @@ export function SettingsPage() {
           </div>
 
           {isPlatform && (
-            <div className="rounded-md border border-slate-200 p-4">
-              <h3 className="mb-3 text-sm font-medium">Metadata (platform admin only)</h3>
+            <div className="rounded-lg border border-slate-200 p-5">
+              <h3 className="text-base font-semibold text-slate-900">Advanced metadata</h3>
+              <p className="mb-4 mt-1 text-sm text-slate-500">Optional structured configuration for platform integrations.</p>
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Custom JSON</span>
                 <textarea value={metadata} onChange={(e) => setMetadata(e.target.value)} rows={4} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs" />

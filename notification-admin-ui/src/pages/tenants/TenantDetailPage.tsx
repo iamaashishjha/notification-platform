@@ -3,9 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { useAuth } from '../../auth/AuthContext';
+import { CheckCircle2, Info, Layers3, XCircle } from 'lucide-react';
 
 type Tenant = { id: string; name: string; slug: string; status: string; created_at: string; updated_at: string };
-type Feature = { id: string; feature_key: string; enabled: boolean; created_at: string };
+type Feature = { id: string; identifier: string; feature_key: string; name: string; description: string; category: string; enabled: boolean; created_at: string };
 type Channel = { id: string; channel: string; enabled: boolean; direction: string; rate_limit_per_second: number; daily_quota: number; created_at: string };
 type Provider = { id: string; channel: string; provider: string; is_default: boolean; status: string; created_at: string };
 type Contact = { id: string; name: string; email: string; phone: string; status: string };
@@ -167,15 +168,27 @@ export function TenantDetailPage() {
     switch (tab) {
       case 'overview': return <OverviewSection overview={ov} />;
       case 'features': return (
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-slate-200 text-slate-500"><tr><th className="py-2">Feature</th><th>Enabled</th><th>Action</th></tr></thead>
-          <tbody>
+        <div>
+          <div className="mb-5 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+            <Info className="mt-0.5 shrink-0 text-blue-600" size={18} />
+            <div><div className="text-sm font-semibold text-blue-900">Tenant capabilities</div><p className="mt-0.5 text-sm leading-5 text-blue-700">Turn capabilities on or off for {ov.tenant.name}. Changes take effect immediately and may affect what tenant users can access.</p></div>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-2">
             {ov.features.map((f) => (
-              <tr key={f.id} className="border-b border-slate-100"><td className="py-3 font-medium">{f.feature_key}</td><td>{f.enabled ? 'Yes' : 'No'}</td><td><Toggle value={f.enabled} onChange={() => toggleFeature(f.id, !f.enabled)} /></td></tr>
+              <article key={f.id} className={`rounded-lg border p-4 transition-colors ${f.enabled ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/70'}`}>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 gap-3">
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${f.enabled ? 'bg-blue-50 text-blue-600' : 'bg-slate-200 text-slate-500'}`}><Layers3 size={18} /></span>
+                    <div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{f.name}</h3><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{f.category}</span></div><p className="mt-1 text-sm leading-5 text-slate-600">{f.description}</p><code className="mt-2 block text-xs text-slate-400">{f.identifier || f.feature_key}</code></div>
+                  </div>
+                  <Toggle value={f.enabled} onChange={() => toggleFeature(f.id, !f.enabled)} />
+                </div>
+                <div className={`mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs font-medium ${f.enabled ? 'text-emerald-700' : 'text-slate-500'}`}>{f.enabled ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{f.enabled ? `Available to ${ov.tenant.name}` : `Not available to ${ov.tenant.name}`}</div>
+              </article>
             ))}
-            {ov.features.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400">No features configured</td></tr>}
-          </tbody>
-        </table>
+          </div>
+          {ov.features.length === 0 && <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center"><Layers3 className="mx-auto mb-2 text-slate-300" size={28} /><p className="text-sm font-medium text-slate-600">No capabilities assigned</p><p className="mt-1 text-xs text-slate-400">This tenant does not have any catalog features configured.</p></div>}
+        </div>
       );
       case 'channels': return (
         <table className="w-full text-left text-sm">

@@ -103,17 +103,27 @@ func (h Handler) UpdateContact(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	argN := 1
 	if req.Name != "" {
-		q += ", name = $" + itoa(argN); args = append(args, req.Name); argN++
+		q += ", name = $" + itoa(argN)
+		args = append(args, req.Name)
+		argN++
 	}
 	if req.Email != "" {
-		q += ", email = $" + itoa(argN); args = append(args, req.Email); argN++
+		q += ", email = $" + itoa(argN)
+		args = append(args, req.Email)
+		argN++
 	}
 	if req.Phone != "" {
-		q += ", phone = $" + itoa(argN); args = append(args, req.Phone); argN++
+		q += ", phone = $" + itoa(argN)
+		args = append(args, req.Phone)
+		argN++
 	}
-	q += " WHERE id = $" + itoa(argN); args = append(args, id); argN++
+	q += " WHERE id = $" + itoa(argN)
+	args = append(args, id)
+	argN++
 	if !p.IsPlatform {
-		q += " AND tenant_id = $" + itoa(argN); args = append(args, p.TenantID); argN++
+		q += " AND tenant_id = $" + itoa(argN)
+		args = append(args, p.TenantID)
+		argN++
 	}
 	result, err := h.db.Exec(r.Context(), q, args...)
 	if err != nil {
@@ -276,7 +286,7 @@ func (h Handler) DeleteGroup(w http.ResponseWriter, r *http.Request) {
 func (h Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
 	tenantFilter := r.URL.Query().Get("tenant_id")
-	q := `SELECT nt.id::text, nt.tenant_id::text, nt.template_key, COALESCE(nt.channel,''), COALESCE(nt.subject,''), nt.status, nt.created_at`
+	q := `SELECT nt.id::text, nt.tenant_id::text, nt.template_key, COALESCE(nt.channel,''), COALESCE(nt.subject,''), nt.body, nt.status, nt.created_at`
 	args := []any{}
 	if p.IsPlatform {
 		q += `, COALESCE(t.name,'') AS tenant_name FROM notification_templates nt LEFT JOIN tenants t ON t.id = nt.tenant_id`
@@ -297,21 +307,21 @@ func (h Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, tenantID, key, channel, subject, status string
+		var id, tenantID, key, channel, subject, body, status string
 		var createdAt time.Time
 		if p.IsPlatform {
 			var tenantName string
-			if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &status, &createdAt, &tenantName); err != nil {
+			if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &body, &status, &createdAt, &tenantName); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "template_key": key, "channel": channel, "subject": subject, "status": status, "created_at": createdAt})
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "template_key": key, "channel": channel, "subject": subject, "body": body, "status": status, "created_at": createdAt})
 		} else {
-			if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &status, &createdAt); err != nil {
+			if err := rows.Scan(&id, &tenantID, &key, &channel, &subject, &body, &status, &createdAt); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "template_key": key, "channel": channel, "subject": subject, "status": status, "created_at": createdAt})
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "template_key": key, "channel": channel, "subject": subject, "body": body, "status": status, "created_at": createdAt})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -356,25 +366,24 @@ func (h Handler) CreateTemplate(w http.ResponseWriter, r *http.Request) {
 func (h Handler) UpdateTemplate(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Subject string `json:"subject"`
-		Body    string `json:"body"`
+		TemplateKey string `json:"template_key"`
+		Channel     string `json:"channel"`
+		Subject     string `json:"subject"`
+		Body        string `json:"body"`
 	}
 	if decode(w, r, &req) != nil {
 		return
 	}
 	p, _ := httpmw.Principal(r.Context())
-	q := `UPDATE notification_templates SET updated_at = now()`
-	args := []any{}
-	argN := 1
-	if req.Subject != "" {
-		q += ", subject = $" + itoa(argN); args = append(args, req.Subject); argN++
+	if req.TemplateKey == "" || req.Channel == "" || req.Body == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "template_key, channel, and body are required"})
+		return
 	}
-	if req.Body != "" {
-		q += ", body = $" + itoa(argN); args = append(args, req.Body); argN++
-	}
-	q += " WHERE id = $" + itoa(argN); args = append(args, id); argN++
+	q := `UPDATE notification_templates SET template_key = $1, channel = $2, subject = $3, body = $4, updated_at = now() WHERE id = $5`
+	args := []any{req.TemplateKey, req.Channel, nullIfEmpty(req.Subject), req.Body, id}
 	if !p.IsPlatform {
-		q += " AND tenant_id = $" + itoa(argN); args = append(args, p.TenantID); argN++
+		q += " AND tenant_id = $6"
+		args = append(args, p.TenantID)
 	}
 	result, err := h.db.Exec(r.Context(), q, args...)
 	if err != nil {
@@ -519,17 +528,27 @@ func (h Handler) UpdateCampaign(w http.ResponseWriter, r *http.Request) {
 	args := []any{}
 	argN := 1
 	if req.Name != "" {
-		q += ", name = $" + itoa(argN); args = append(args, req.Name); argN++
+		q += ", name = $" + itoa(argN)
+		args = append(args, req.Name)
+		argN++
 	}
 	if req.Description != "" {
-		q += ", description = $" + itoa(argN); args = append(args, req.Description); argN++
+		q += ", description = $" + itoa(argN)
+		args = append(args, req.Description)
+		argN++
 	}
 	if req.Status != "" {
-		q += ", status = $" + itoa(argN); args = append(args, req.Status); argN++
+		q += ", status = $" + itoa(argN)
+		args = append(args, req.Status)
+		argN++
 	}
-	q += " WHERE id = $" + itoa(argN); args = append(args, id); argN++
+	q += " WHERE id = $" + itoa(argN)
+	args = append(args, id)
+	argN++
 	if !p.IsPlatform {
-		q += " AND tenant_id = $" + itoa(argN); args = append(args, p.TenantID); argN++
+		q += " AND tenant_id = $" + itoa(argN)
+		args = append(args, p.TenantID)
+		argN++
 	}
 	result, err := h.db.Exec(r.Context(), q, args...)
 	if err != nil {
