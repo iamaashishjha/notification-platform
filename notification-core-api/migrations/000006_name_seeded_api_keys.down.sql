@@ -1,0 +1,2 @@
+-- Seed display names are intentionally not reverted because tenant-specific names
+-- are more descriptive and existing key material is unaffected.

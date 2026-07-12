@@ -50,6 +50,7 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 	// Platform Catalog
 	mux.Handle("GET /admin/api/v1/feature-catalog", middleware.Chain(authSvc, "features.view", h.ListFeatureCatalog))
 	mux.Handle("GET /admin/api/v1/channel-catalog", middleware.Chain(authSvc, "channels.view", h.ListChannelCatalog))
+	mux.Handle("PUT /admin/api/v1/channel-catalog/{channel}", middleware.Chain(authSvc, "channels.update", h.UpdatePlatformChannel))
 	mux.Handle("GET /admin/api/v1/provider-types", middleware.Chain(authSvc, "providers.view", h.ListProviderTypes))
 
 	// Audit logs

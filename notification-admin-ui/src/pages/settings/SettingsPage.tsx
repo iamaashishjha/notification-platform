@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { SearchSelect } from '../../components/SearchSelect';
 import { useAuth } from '../../auth/AuthContext';
 import { Save } from 'lucide-react';
 
@@ -82,9 +83,7 @@ export function SettingsPage() {
       {isPlatform && (
         <label className="mb-5 block max-w-xl text-sm">
           <span className="mb-1 block font-medium">Tenant</span>
-          <select value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-            {tenants.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>)}
-          </select>
+          <SearchSelect value={selectedTenantId} onChange={setSelectedTenantId} placeholder="Select tenant" options={tenants.map((t)=>({value:t.id,label:`${t.name} (${t.slug})`}))}/>
         </label>
       )}
 
@@ -98,20 +97,7 @@ export function SettingsPage() {
             <div className="space-y-3">
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Timezone</span>
-                <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-                  <option value="">Default (UTC)</option>
-                  <option value="America/New_York">America/New_York</option>
-                  <option value="America/Chicago">America/Chicago</option>
-                  <option value="America/Denver">America/Denver</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles</option>
-                  <option value="Europe/London">Europe/London</option>
-                  <option value="Europe/Berlin">Europe/Berlin</option>
-                  <option value="Asia/Shanghai">Asia/Shanghai</option>
-                  <option value="Asia/Tokyo">Asia/Tokyo</option>
-                  <option value="Asia/Kolkata">Asia/Kolkata</option>
-                  <option value="Australia/Sydney">Australia/Sydney</option>
-                  <option value="Pacific/Auckland">Pacific/Auckland</option>
-                </select>
+                <SearchSelect value={timezone} onChange={setTimezone} placeholder="Default (UTC)" options={['','America/New_York','America/Chicago','America/Denver','America/Los_Angeles','Europe/London','Europe/Berlin','Asia/Shanghai','Asia/Tokyo','Asia/Kolkata','Australia/Sydney','Pacific/Auckland'].map((value)=>({value,label:value||'Default (UTC)'}))}/>
               </label>
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Country</span>

@@ -3,8 +3,12 @@ import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { useAuth } from '../../auth/AuthContext';
 import { Plus, Play, XCircle } from 'lucide-react';
+import { Modal, ModalButton } from '../../components/Modal';
+import { SearchSelect } from '../../components/SearchSelect';
+import { StatusBadge } from '../../components/StatusBadge';
 
 type Campaign = { id: string; tenant_id: string; tenant_name?: string; name: string; description: string; status: string; scheduled_at: string; created_at: string };
+type Tenant = { id: string; name: string; status: string };
 
 export function CampaignsPage() {
   const { user, can } = useAuth();
@@ -18,6 +22,9 @@ export function CampaignsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [tenantFilter, setTenantFilter] = useState('');
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+
+  useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r) => setTenants(r.data)).catch(() => {}); }, [isPlatform]);
 
   const load = () => {
     setLoading(true);
@@ -54,18 +61,20 @@ export function CampaignsPage() {
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
 
-      {showForm && (
-        <form onSubmit={submit} className="mb-6 max-w-lg space-y-3 rounded-md border border-slate-200 p-4">
+      {showForm && <Modal title="Create campaign" description="Create a coordinated notification campaign for review and delivery." onClose={() => setShowForm(false)} footer={<><ModalButton onClick={() => setShowForm(false)}>Cancel</ModalButton><ModalButton type="submit" variant="primary" disabled={saving} onClick={() => document.getElementById('campaign-create-form')?.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))}>{saving ? 'Creating...' : 'Create campaign'}</ModalButton></>} width="max-w-2xl">
+        <form id="campaign-create-form" onSubmit={submit} className="space-y-5 px-6 py-5">
+          <label className="block text-sm"><span className="mb-1.5 block font-medium">Campaign name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Campaign name" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
+          </label><label className="block text-sm"><span className="mb-1.5 block font-medium">Description</span>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" rows={3} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <button disabled={saving} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{saving ? 'Saving...' : 'Create'}</button>
+          </label>
         </form>
-      )}
+      </Modal>}
 
       {isPlatform && (
         <label className="mb-4 block text-sm">
           <span className="mb-1 block font-medium">Tenant Filter</span>
-          <input value={tenantFilter} onChange={(e) => setTenantFilter(e.target.value)} placeholder="Filter by tenant ID" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+          <SearchSelect value={tenantFilter} onChange={setTenantFilter} placeholder="All tenants" options={[{value:'',label:'All tenants'}, ...tenants.map((t) => ({value:t.id,label:t.name}))]} />
         </label>
       )}
 
@@ -83,7 +92,7 @@ export function CampaignsPage() {
               <tr key={item.id} className="border-b border-slate-100">
                 <td className="py-3 font-medium">{item.name}</td>
                 {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
-                <td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.status === 'active' || item.status === 'sending' ? 'bg-green-100 text-green-700' : item.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{item.status}</span></td>
+                <td><StatusBadge status={item.status}/></td>
                 <td>{item.scheduled_at || '-'}</td>
                 <td>{item.created_at}</td>
                 <td>

@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Modal, ModalButton } from '../../components/Modal';
+import { SearchSelect } from '../../components/SearchSelect';
+import { StatusBadge } from '../../components/StatusBadge';
 import { useAuth } from '../../auth/AuthContext';
 import { Plus, Trash2, UserPlus, UserX } from 'lucide-react';
 
@@ -81,18 +84,11 @@ export function GroupsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : 'Remove failed'); }
   }
 
-  return (
+  const expandedGroup = items.find((item)=>item.id===expanded);
+  return (<>
     <Panel title="Contact Groups" actions={can('groups.create') ? <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Create Group</>}</button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
-
-      {showForm && (
-        <form onSubmit={submit} className="mb-6 max-w-lg space-y-3 rounded-md border border-slate-200 p-4">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Group name" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" rows={2} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
-          <button disabled={saving} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{saving ? 'Saving...' : 'Create'}</button>
-        </form>
-      )}
 
       {isPlatform && (
         <label className="mb-4 block text-sm">
@@ -117,53 +113,19 @@ export function GroupsPage() {
                   <td className="py-3 font-medium">{item.name}</td>
                   {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
                   <td>{item.member_count}</td>
-                  <td>{item.status}</td>
+                  <td><StatusBadge status={item.status}/></td>
                   <td className="text-right">
-                    <button onClick={() => toggleGroup(item.id)} className="text-blue-600 hover:underline mr-3">{expanded === item.id ? 'Hide' : 'Members'}</button>
+                    <button onClick={() => toggleGroup(item.id)} className="text-blue-600 hover:underline mr-3">View members</button>
                     {can('groups.delete') && <button onClick={() => remove(item.id)} className="inline-flex items-center gap-1 text-red-600 hover:underline"><Trash2 size={12} />Delete</button>}
                   </td>
                 </tr>
-                {expanded === item.id && (
-                  <tr key={`${item.id}-members`}>
-                    <td colSpan={isPlatform ? 5 : 4} className="bg-slate-50 p-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          {can('groups.members.manage') && <button onClick={() => setShowAddMember(showAddMember === item.id ? null : item.id)} className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-xs text-white"><UserPlus size={12} />Add Member</button>}
-                        </div>
-                        {showAddMember === item.id && (
-                          <div className="mb-3 flex gap-2">
-                            <select className="rounded border px-2 py-1 text-xs" onChange={(e) => addMember(item.id, e.target.value)} defaultValue="">
-                              <option value="" disabled>Select contact...</option>
-                              {contacts.filter((c) => !members.find((m) => m.id === c.id)).map((c) => (
-                                <option key={c.id} value={c.id}>{c.name} ({c.email || c.phone || 'no contact info'})</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-                        {members.length === 0 ? (
-                          <div className="text-sm text-slate-500">No members</div>
-                        ) : (
-                          <table className="w-full text-left text-xs">
-                            <thead><tr className="text-slate-500"><th className="py-1">Name</th><th>Email</th><th>Phone</th><th /></tr></thead>
-                            <tbody>
-                              {members.map((m) => (
-                                <tr key={m.id} className="border-t border-slate-100">
-                                  <td className="py-1">{m.name}</td><td>{m.email || '-'}</td><td>{m.phone || '-'}</td>
-                                  <td>{can('groups.members.manage') && <button onClick={() => removeMember(item.id, m.id)} className="inline-flex items-center gap-1 text-red-600 hover:underline"><UserX size={12} />Remove</button>}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )}
               </>
             ))}
           </tbody>
         </table>
       )}
     </Panel>
-  );
+    {showForm&&<Modal title="Create contact group" description="Create a reusable audience for notification delivery." onClose={()=>setShowForm(false)} width="max-w-2xl" footer={<><ModalButton onClick={()=>setShowForm(false)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={()=>document.getElementById('group-create-form')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))}>{saving?'Creating...':'Create group'}</ModalButton></>}><form id="group-create-form" onSubmit={submit} className="space-y-4 px-6 py-5"><label className="block text-sm"><span className="mb-1 block font-medium">Group name</span><input value={name} onChange={(e)=>setName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Description</span><textarea value={description} onChange={(e)=>setDescription(e.target.value)} rows={3} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label></form></Modal>}
+    {expandedGroup&&<Modal title={expandedGroup.name} description={`${expandedGroup.member_count} contacts in this delivery audience.`} onClose={()=>{setExpanded(null);setShowAddMember(null)}} footer={<ModalButton onClick={()=>{setExpanded(null);setShowAddMember(null)}}>Close</ModalButton>}><div className="px-6 py-5">{can('groups.members.manage')&&<div className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-4"><button onClick={()=>setShowAddMember(showAddMember?null:expandedGroup.id)} className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white"><UserPlus size={14}/>Add member</button>{showAddMember&&<div className="mt-3"><SearchSelect value="" placeholder="Search contacts to add" onChange={(value)=>{addMember(expandedGroup.id,value);setShowAddMember(null)}} options={contacts.filter((c)=>!members.some((m)=>m.id===c.id)).map((c)=>({value:c.id,label:`${c.name} (${c.email||c.phone||'no contact info'})`}))}/></div>}</div>}{members.length===0?<div className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">No members in this group</div>:<table className="w-full text-left text-sm"><thead className="border-b text-slate-500"><tr><th className="py-2">Name</th><th>Email</th><th>Phone</th><th/></tr></thead><tbody>{members.map((m)=><tr key={m.id} className="border-b border-slate-100"><td className="py-3 font-medium">{m.name}</td><td>{m.email||'-'}</td><td>{m.phone||'-'}</td><td>{can('groups.members.manage')&&<button onClick={()=>removeMember(expandedGroup.id,m.id)} className="inline-flex items-center gap-1 text-xs text-red-600"><UserX size={12}/>Remove</button>}</td></tr>)}</tbody></table>}</div></Modal>}
+  </>);
 }

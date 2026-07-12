@@ -435,6 +435,10 @@ func (h Handler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
 		return
 	}
+	if tenantID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_id is required"})
+		return
+	}
 	var expiresAt *time.Time
 	if req.ExpiresIn != "" {
 		d, err := time.ParseDuration(req.ExpiresIn)
@@ -563,11 +567,14 @@ func (h Handler) ListFeatures(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT tc.id::text, tc.channel, tc.enabled, tc.direction, tc.rate_limit_per_second, tc.daily_quota, COALESCE(t.name,'') FROM tenant_channels tc JOIN tenants t ON t.id = tc.tenant_id`
+	q := `SELECT tc.id::text, tc.channel, tc.enabled, tc.direction, tc.rate_limit_per_second, tc.daily_quota, COALESCE(t.name,'') FROM tenant_channels tc JOIN tenants t ON t.id = tc.tenant_id JOIN platform_channels pc ON pc.channel=tc.channel AND pc.enabled=true`
 	args := []any{}
 	if !p.IsPlatform {
 		q += ` WHERE tc.tenant_id = $1`
 		args = append(args, p.TenantID)
+	} else if tenantID := r.URL.Query().Get("tenant_id"); tenantID != "" {
+		q += ` WHERE tc.tenant_id = $1`
+		args = append(args, tenantID)
 	}
 	q += ` ORDER BY t.name, tc.channel LIMIT 200`
 	rows, err := h.db.Query(r.Context(), q, args...)
@@ -1340,16 +1347,98 @@ func (h Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"message": "email verified"})
 }
 
+type tenantProvisioningRequest struct {
+	Name     string         `json:"name"`
+	Slug     string         `json:"slug"`
+	Settings map[string]any `json:"settings"`
+	Features []string       `json:"features"`
+	Channels []struct {
+		Channel    string `json:"channel"`
+		Enabled    bool   `json:"enabled"`
+		Direction  string `json:"direction"`
+		RateLimit  int    `json:"rate_limit_per_second"`
+		DailyQuota int    `json:"daily_quota"`
+	} `json:"channels"`
+	Providers []struct {
+		Channel   string `json:"channel"`
+		Provider  string `json:"provider"`
+		IsDefault bool   `json:"is_default"`
+	} `json:"providers"`
+	Templates []struct {
+		TemplateKey string `json:"template_key"`
+		Channel     string `json:"channel"`
+		Subject     string `json:"subject"`
+		Body        string `json:"body"`
+	} `json:"templates"`
+}
+
+func (h Handler) applyTenantProvisioning(ctx context.Context, tenantID string, req tenantProvisioningRequest) error {
+	if req.Settings != nil {
+		raw, _ := json.Marshal(req.Settings)
+		if _, err := h.db.Exec(ctx, `UPDATE tenants SET config_json=$1::jsonb,updated_at=now() WHERE id=$2`, string(raw), tenantID); err != nil {
+			return err
+		}
+	}
+	if req.Features != nil {
+		if _, err := h.db.Exec(ctx, `INSERT INTO tenant_features(tenant_id,feature_key,enabled) SELECT $1,identifier,identifier=ANY($2::text[]) FROM feature_catalog WHERE status='active' ON CONFLICT(tenant_id,feature_key) DO UPDATE SET enabled=EXCLUDED.enabled,updated_at=now()`, tenantID, req.Features); err != nil {
+			return err
+		}
+	}
+	for _, channel := range req.Channels {
+		direction := channel.Direction
+		if direction == "" {
+			direction = "one_way"
+		}
+		rate := channel.RateLimit
+		if rate < 1 {
+			rate = 10
+		}
+		quota := channel.DailyQuota
+		if quota < 1 {
+			quota = 10000
+		}
+		if _, err := h.db.Exec(ctx, `INSERT INTO tenant_channels(tenant_id,channel,enabled,direction,rate_limit_per_second,daily_quota) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,channel) DO UPDATE SET enabled=EXCLUDED.enabled,direction=EXCLUDED.direction,rate_limit_per_second=EXCLUDED.rate_limit_per_second,daily_quota=EXCLUDED.daily_quota,updated_at=now()`, tenantID, channel.Channel, channel.Enabled, direction, rate, quota); err != nil {
+			return err
+		}
+	}
+	if req.Providers != nil {
+		if _, err := h.db.Exec(ctx, `DELETE FROM tenant_provider_configs WHERE tenant_id=$1`, tenantID); err != nil {
+			return err
+		}
+		for _, provider := range req.Providers {
+			encrypted, err := security.Encrypt(`{}`)
+			if err != nil {
+				return err
+			}
+			if _, err = h.db.Exec(ctx, `INSERT INTO tenant_provider_configs(tenant_id,channel,provider,config_json,is_default,status) VALUES($1,$2,$3,$4::jsonb,$5,'active')`, tenantID, provider.Channel, provider.Provider, encrypted, provider.IsDefault); err != nil {
+				return err
+			}
+		}
+	}
+	if req.Templates != nil {
+		if _, err := h.db.Exec(ctx, `DELETE FROM notification_templates WHERE tenant_id=$1`, tenantID); err != nil {
+			return err
+		}
+	}
+	for _, template := range req.Templates {
+		if template.TemplateKey == "" || template.Channel == "" || template.Body == "" {
+			continue
+		}
+		if _, err := h.db.Exec(ctx, `INSERT INTO notification_templates(tenant_id,template_key,channel,subject,body,status) VALUES($1,$2,$3,$4,$5,'active') ON CONFLICT(tenant_id,template_key,channel,locale) DO UPDATE SET subject=EXCLUDED.subject,body=EXCLUDED.body,status='active',updated_at=now()`, tenantID, template.TemplateKey, template.Channel, nullIfEmpty(template.Subject), template.Body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (h Handler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
 	if !p.IsPlatform {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin only"})
 		return
 	}
-	var req struct {
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-	}
+	// name and slug are required before provisioning.
+	var req tenantProvisioningRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 		return
@@ -1366,6 +1455,10 @@ func (h Handler) CreateTenant(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "insert failed"})
+		return
+	}
+	if err = h.applyTenantProvisioning(r.Context(), id, req); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "tenant created but provisioning failed", "detail": err.Error()})
 		return
 	}
 	_ = h.audit.Write(r.Context(), audit.Event{ActorUserID: p.UserID, ActorType: "user", Action: "tenants.create", ResourceType: "tenant", ResourceID: id})
@@ -1400,10 +1493,7 @@ func (h Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenantID := r.PathValue("id")
-	var req struct {
-		Name *string `json:"name"`
-		Slug *string `json:"slug"`
-	}
+	var req tenantProvisioningRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
 		return
@@ -1411,30 +1501,33 @@ func (h Handler) UpdateTenant(w http.ResponseWriter, r *http.Request) {
 	sets := []string{}
 	args := []any{}
 	argN := 1
-	if req.Name != nil {
+	if req.Name != "" {
 		sets = append(sets, "name = $"+itoa(argN))
-		args = append(args, *req.Name)
+		args = append(args, req.Name)
 		argN++
 	}
-	if req.Slug != nil {
+	if req.Slug != "" {
 		sets = append(sets, "slug = $"+itoa(argN))
-		args = append(args, *req.Slug)
+		args = append(args, req.Slug)
 		argN++
 	}
-	if len(sets) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "no fields to update"})
-		return
+	var err error
+	if len(sets) > 0 {
+		sets = append(sets, "updated_at = now()")
+		args = append(args, tenantID)
+		q := `UPDATE tenants SET ` + strings.Join(sets, ", ") + ` WHERE id = $` + itoa(argN)
+		_, err = h.db.Exec(r.Context(), q, args...)
 	}
-	sets = append(sets, "updated_at = now()")
-	args = append(args, tenantID)
-	q := `UPDATE tenants SET ` + strings.Join(sets, ", ") + ` WHERE id = $` + itoa(argN)
-	_, err := h.db.Exec(r.Context(), q, args...)
 	if err != nil {
 		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": "slug already exists"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	if err = h.applyTenantProvisioning(r.Context(), tenantID, req); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "configuration update failed", "detail": err.Error()})
 		return
 	}
 	_ = h.audit.Write(r.Context(), audit.Event{ActorUserID: p.UserID, ActorType: "user", Action: "tenants.update", ResourceType: "tenant", ResourceID: tenantID})
@@ -1684,19 +1777,12 @@ func (h Handler) ListChannelCatalog(w http.ResponseWriter, r *http.Request) {
 		Channel     string `json:"channel"`
 		Description string `json:"description"`
 		TenantCount int    `json:"tenant_count"`
+		Enabled     bool   `json:"enabled"`
 	}
 	rows, err := h.db.Query(r.Context(), `
-		WITH platform_channels (channel, description) AS (VALUES
-			('email','Email delivery via SMTP, SendGrid, or SES'),
-			('sms','SMS delivery via Twilio, Sparrow, or HTTP gateway'),
-			('fcm','Firebase Cloud Messaging for Android/iOS push'),
-			('websocket','Real-time browser notifications via WebSocket'),
-			('in_app','In-app notification center with offline sync'),
-			('whatsapp','WhatsApp Business API messaging (placeholder)'),
-			('web_push','Browser push notifications (placeholder)')
-		)
 		SELECT pc.channel, pc.description,
 			COALESCE((SELECT COUNT(*) FROM tenant_channels tc WHERE tc.channel = pc.channel), 0) AS tenant_count
+			, pc.enabled
 		FROM platform_channels pc ORDER BY pc.channel`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -1706,7 +1792,7 @@ func (h Handler) ListChannelCatalog(w http.ResponseWriter, r *http.Request) {
 	var out []ChannelItem
 	for rows.Next() {
 		var item ChannelItem
-		if err := rows.Scan(&item.Channel, &item.Description, &item.TenantCount); err != nil {
+		if err := rows.Scan(&item.Channel, &item.Description, &item.TenantCount, &item.Enabled); err != nil {
 			continue
 		}
 		out = append(out, item)
@@ -1715,6 +1801,34 @@ func (h Handler) ListChannelCatalog(w http.ResponseWriter, r *http.Request) {
 		out = []ChannelItem{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (h Handler) UpdatePlatformChannel(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin required"})
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if decode(w, r, &req) != nil {
+		return
+	}
+	if req.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "enabled is required"})
+		return
+	}
+	result, err := h.db.Exec(r.Context(), `UPDATE platform_channels SET enabled=$1, updated_at=now() WHERE channel=$2`, *req.Enabled, r.PathValue("channel"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "channel not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "platform channel updated"})
 }
 
 func (h Handler) ListProviderTypes(w http.ResponseWriter, r *http.Request) {

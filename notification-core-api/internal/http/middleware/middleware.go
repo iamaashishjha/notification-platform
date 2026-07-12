@@ -1,12 +1,17 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"runtime/debug"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -224,7 +229,137 @@ func RequireScope(scope string) func(http.Handler) http.Handler {
 }
 
 func Chain(svc auth.Service, permission string, next http.HandlerFunc) http.Handler {
-	return JWT(svc)(RequirePermission(svc, permission)(http.HandlerFunc(next)))
+	return JWT(svc)(RequirePermission(svc, permission)(DataTableQuery(http.HandlerFunc(next))))
+}
+
+type bufferedResponse struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (w *bufferedResponse) Header() http.Header    { return w.header }
+func (w *bufferedResponse) WriteHeader(status int) { w.status = status }
+func (w *bufferedResponse) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(body)
+}
+
+// DataTableQuery gives every JSON list endpoint a common query contract:
+// q, filter_<field>, sort, order, page, and per_page.
+func DataTableQuery(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if r.Method != http.MethodGet || (query.Get("q") == "" && query.Get("sort") == "" && query.Get("page") == "" && query.Get("per_page") == "" && !hasFilter(query)) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		buffer := &bufferedResponse{header: make(http.Header)}
+		next.ServeHTTP(buffer, r)
+		if buffer.status == 0 {
+			buffer.status = http.StatusOK
+		}
+		for key, values := range buffer.header {
+			w.Header()[key] = values
+		}
+		if buffer.status >= 300 {
+			w.WriteHeader(buffer.status)
+			_, _ = w.Write(buffer.body.Bytes())
+			return
+		}
+		var payload map[string]any
+		if json.Unmarshal(buffer.body.Bytes(), &payload) != nil {
+			w.WriteHeader(buffer.status)
+			_, _ = w.Write(buffer.body.Bytes())
+			return
+		}
+		raw, ok := payload["data"].([]any)
+		if !ok {
+			w.WriteHeader(buffer.status)
+			_, _ = w.Write(buffer.body.Bytes())
+			return
+		}
+		q := strings.ToLower(strings.TrimSpace(query.Get("q")))
+		filtered := make([]map[string]any, 0, len(raw))
+		for _, entry := range raw {
+			item, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			encoded, _ := json.Marshal(item)
+			if q != "" && !strings.Contains(strings.ToLower(string(encoded)), q) {
+				continue
+			}
+			if !matchesFilters(item, query) {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		field := query.Get("sort")
+		direction := strings.ToLower(query.Get("order"))
+		if field != "" {
+			sort.SliceStable(filtered, func(i, j int) bool {
+				a, b := fmt.Sprint(filtered[i][field]), fmt.Sprint(filtered[j][field])
+				less := strings.Compare(strings.ToLower(a), strings.ToLower(b)) < 0
+				if direction == "desc" {
+					return !less && a != b
+				}
+				return less
+			})
+		}
+		page := positiveInt(query.Get("page"), 1)
+		perPage := positiveInt(query.Get("per_page"), 25)
+		if perPage > 100 {
+			perPage = 100
+		}
+		total := len(filtered)
+		start := (page - 1) * perPage
+		if start > total {
+			start = total
+		}
+		end := start + perPage
+		if end > total {
+			end = total
+		}
+		data := make([]any, 0, end-start)
+		for _, item := range filtered[start:end] {
+			data = append(data, item)
+		}
+		payload["data"] = data
+		payload["meta"] = map[string]any{"page": page, "per_page": perPage, "total": total, "total_pages": max(1, (total+perPage-1)/perPage)}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(buffer.status)
+		_ = json.NewEncoder(w).Encode(payload)
+	})
+}
+func hasFilter(values map[string][]string) bool {
+	for key := range values {
+		if strings.HasPrefix(key, "filter_") {
+			return true
+		}
+	}
+	return false
+}
+func matchesFilters(item map[string]any, values map[string][]string) bool {
+	for key, list := range values {
+		if !strings.HasPrefix(key, "filter_") || len(list) == 0 || list[0] == "" {
+			continue
+		}
+		field := strings.TrimPrefix(key, "filter_")
+		if !strings.EqualFold(fmt.Sprint(item[field]), list[0]) {
+			return false
+		}
+	}
+	return true
+}
+func positiveInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
 }
 
 func APIKeyScope(svc auth.Service, scope string) func(http.Handler) http.Handler {

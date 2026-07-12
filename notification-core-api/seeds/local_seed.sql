@@ -120,9 +120,9 @@ ON CONFLICT (tenant_id, channel) WHERE is_default = true AND status = 'active'
 DO UPDATE SET provider = EXCLUDED.provider, config_json = EXCLUDED.config_json;
 
 INSERT INTO tenant_api_keys (tenant_id, name, key_hash, scopes_json, status)
-SELECT id, 'Local Demo API Key', '616362fb0756eb262a86640207b2e674c6842e8d20b69fe92850ca0cfe5c187c', '["notifications:create", "devices:write", "in_app:read"]'::jsonb, 'active'
+SELECT id, name || ' API Key', '616362fb0756eb262a86640207b2e674c6842e8d20b69fe92850ca0cfe5c187c', '["notifications:create", "devices:write", "in_app:read"]'::jsonb, 'active'
 FROM tenants WHERE slug = 'ecommerce'
-ON CONFLICT (key_hash) DO UPDATE SET status = 'active', scopes_json = EXCLUDED.scopes_json;
+ON CONFLICT (key_hash) DO UPDATE SET name = EXCLUDED.name, status = 'active', scopes_json = EXCLUDED.scopes_json;
 
 INSERT INTO notification_templates (tenant_id, template_key, channel, subject, body, status)
 SELECT id, 'order_confirmation', 'sms', NULL, 'Hi {{customer_name}}, your order #{{order_id}} of ${{total_amount}} is confirmed. Thank you for shopping with us!', 'active' FROM tenants WHERE slug = 'ecommerce'

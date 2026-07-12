@@ -1,8 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Modal, ModalButton } from '../../components/Modal';
+import { SearchSelect } from '../../components/SearchSelect';
+import { StatusBadge } from '../../components/StatusBadge';
 import { useAuth } from '../../auth/AuthContext';
-import { Plus, Power, Pencil, Eye, Trash2, X, Save } from 'lucide-react';
+import { Plus, Power, Pencil, Eye, Trash2 } from 'lucide-react';
 
 type User = { id: string; email: string; name: string; is_platform_admin: boolean; status: string; created_at: string; tenants?: string };
 type Role = { id: string; name: string; key: string; scope: string };
@@ -81,7 +84,9 @@ export function UsersPage() {
     finally { setSaving(false); }
   }
 
-  return (
+  const editingUser = items.find((item) => item.id === editingId);
+  const viewingUser = items.find((item) => item.id === viewingId);
+  return (<>
     <Panel title="Users" actions={can('users.create') ? <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Add User</>}</button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
@@ -91,15 +96,6 @@ export function UsersPage() {
           <span className="mb-1 block font-medium">Tenant Filter</span>
           <input value={tenantFilter} onChange={(e) => setTenantFilter(e.target.value)} placeholder="Filter by tenant ID (optional)" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </label>
-      )}
-
-      {showForm && (
-        <form onSubmit={submit} className="mb-6 max-w-lg space-y-3 rounded-md border border-slate-200 p-4">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Email" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" placeholder="Password" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <button disabled={saving} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{saving ? 'Saving...' : 'Create'}</button>
-        </form>
       )}
 
       {loading ? (
@@ -114,66 +110,28 @@ export function UsersPage() {
           <tbody>
             {items.map((item) => (
               <tr key={item.id} className="border-b border-slate-100">
-                {editingId === item.id ? (
-                  <>
-                    <td className="py-3"><input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full rounded border px-2 py-1 text-xs" /></td>
-                    <td><input value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full rounded border px-2 py-1 text-xs" /></td>
-                    <td>
-                      {isPlatform && (
-                        <select value={editRoleId} onChange={(e) => setEditRoleId(e.target.value)} className="rounded border px-2 py-1 text-xs">
-                          <option value="">No change</option>
-                          {roles.filter((r) => r.scope === 'platform' || r.scope === 'tenant').map((r) => <option key={r.id} value={r.id}>{r.name} ({r.scope})</option>)}
-                        </select>
-                      )}
-                    </td>
-                    <td>{item.status}</td>
-                    {isPlatform && <td>{item.tenants || '-'}</td>}
-                    <td>
-                      <button onClick={() => saveEdit(item.id)} disabled={saving} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50"><Save size={12} />Save</button>
-                      <button onClick={() => setEditingId(null)} className="ml-1 inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"><X size={12} />Cancel</button>
-                    </td>
-                  </>
-                ) : (
-                  <>
                     <td className="py-3 font-medium">{item.name}</td>
                     <td>{item.email}</td>
                     <td>{item.is_platform_admin ? 'Platform Admin' : 'User'}</td>
-                    <td>{item.status}</td>
+                    <td><StatusBadge status={item.status}/></td>
                     {isPlatform && <td className="text-xs text-slate-500">{item.tenants || '-'}</td>}
                     <td>
                       <div className="flex gap-1">
-                        <button onClick={() => setViewingId(viewingId === item.id ? null : item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button>
+                        <button onClick={() => setViewingId(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button>
                         {can('users.update') && <button onClick={() => startEdit(item)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Pencil size={12} />Edit</button>}
                         {can('users.update') && <button onClick={() => toggleUserStatus(item)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Power size={12} />{item.status === 'active' ? 'Disable' : 'Enable'}</button>}
                         {can('users.delete') && <button onClick={() => remove(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={12} />Delete</button>}
                       </div>
                     </td>
-                  </>
-                )}
               </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      {viewingId && items.find((i) => i.id === viewingId) && (
-        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-          <h3 className="mb-2 font-semibold">User Details</h3>
-          {(() => {
-            const u = items.find((i) => i.id === viewingId)!;
-            return (
-              <div className="grid grid-cols-2 gap-2">
-                <div><span className="text-slate-500">Name:</span> {u.name}</div>
-                <div><span className="text-slate-500">Email:</span> {u.email}</div>
-                <div><span className="text-slate-500">Role:</span> {u.is_platform_admin ? 'Platform Admin' : 'User'}</div>
-                <div><span className="text-slate-500">Status:</span> {u.status}</div>
-                <div><span className="text-slate-500">Created:</span> {u.created_at}</div>
-                {isPlatform && <div><span className="text-slate-500">Tenants:</span> {u.tenants || '-'}</div>}
-              </div>
-            );
-          })()}
-        </div>
-      )}
     </Panel>
-  );
+    {showForm && <Modal title="Add user" description="Create an account for the notification administration workspace." onClose={() => setShowForm(false)} width="max-w-2xl" footer={<><ModalButton onClick={() => setShowForm(false)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={() => document.getElementById('user-create-form')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))}>{saving?'Creating...':'Create user'}</ModalButton></>}><form id="user-create-form" onSubmit={submit} className="space-y-4 px-6 py-5"><label className="block text-sm"><span className="mb-1 block font-medium">Full name</span><input value={name} onChange={(e)=>setName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Email address</span><input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Temporary password</span><input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label></form></Modal>}
+    {editingUser && <Modal title="Edit user" description={`Update ${editingUser.name}'s account and role assignment.`} onClose={()=>setEditingId(null)} width="max-w-2xl" footer={<><ModalButton onClick={()=>setEditingId(null)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={()=>saveEdit(editingUser.id)}>{saving?'Saving...':'Save changes'}</ModalButton></>}><div className="space-y-4 px-6 py-5"><label className="block text-sm"><span className="mb-1 block font-medium">Full name</span><input value={editName} onChange={(e)=>setEditName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label><label className="block text-sm"><span className="mb-1 block font-medium">Email address</span><input value={editEmail} onChange={(e)=>setEditEmail(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label>{isPlatform&&<label className="block text-sm"><span className="mb-1 block font-medium">Assign role</span><SearchSelect value={editRoleId} onChange={setEditRoleId} placeholder="No role change" options={[{value:'',label:'No role change'},...roles.map((r)=>({value:r.id,label:`${r.name} (${r.scope})`}))]}/></label>}</div></Modal>}
+    {viewingUser && <Modal title="User details" description="Account identity, access level, and status." onClose={()=>setViewingId(null)} width="max-w-2xl" footer={<><ModalButton onClick={()=>setViewingId(null)}>Close</ModalButton>{can('users.update')&&<ModalButton variant="primary" onClick={()=>{setViewingId(null);startEdit(viewingUser)}}>Edit user</ModalButton>}</>}><dl className="grid gap-4 px-6 py-5 sm:grid-cols-2">{[['Name',viewingUser.name],['Email',viewingUser.email],['Role',viewingUser.is_platform_admin?'Platform Admin':'User'],['Status',viewingUser.status],['Created',viewingUser.created_at],...(isPlatform?[['Tenants',viewingUser.tenants||'-']]:[])].map(([label,value])=><div key={label} className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-medium uppercase text-slate-400">{label}</dt><dd className="mt-1 text-sm font-medium">{value}</dd></div>)}</dl></Modal>}
+  </>);
 }

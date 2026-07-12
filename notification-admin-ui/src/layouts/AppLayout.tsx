@@ -1,6 +1,7 @@
 import { Bell, Building2, KeyRound, LayoutDashboard, LogOut, Megaphone, Send, Settings, Shield, UserRoundCog, Users, BookOpen, FileText, Sliders, MessageSquare } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { DataTableEnhancer } from '../components/DataTableEnhancer';
 
 const platformNav = [
   { section: 'Platform', items: [
@@ -95,6 +96,7 @@ export function AppLayout() {
           </button>
         </header>
         <main className="p-6">
+          <DataTableEnhancer />
           <Outlet />
         </main>
       </div>

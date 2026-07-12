@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { StatusBadge } from '../../components/StatusBadge';
 import { useAuth } from '../../auth/AuthContext';
 import { Send } from 'lucide-react';
 
@@ -32,7 +33,7 @@ export function NotificationsPage() {
           <tbody>
             {items.map((item) => (
               <tr key={item.public_id} className="border-b border-slate-100">
-                <td className="py-3 font-medium">{item.public_id}</td><td>{item.tenant}</td><td>{item.event}</td><td>{item.status}</td><td>{item.created_at}</td>
+                <td className="py-3 font-medium">{item.public_id}</td><td>{item.tenant}</td><td>{item.event}</td><td><StatusBadge status={item.status}/></td><td>{item.created_at}</td>
               </tr>
             ))}
           </tbody>

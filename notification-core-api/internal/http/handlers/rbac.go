@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
@@ -110,6 +111,17 @@ func (h Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot create platform-scoped role"})
 			return
 		}
+	}
+	if scope != "tenant" && scope != "platform" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "scope must be tenant or platform"})
+		return
+	}
+	if scope == "tenant" && tenantID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_id is required for tenant-scoped roles"})
+		return
+	}
+	if scope == "platform" {
+		tenantID = ""
 	}
 
 	var id string
@@ -448,7 +460,7 @@ FROM permissions p ORDER BY p.key`)
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 			return
 		}
-		items = append(items, map[string]any{"id": id, "key": key, "description": desc, "roles": rolesJSON})
+		items = append(items, map[string]any{"id": id, "key": key, "description": desc, "roles": json.RawMessage(rolesJSON)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
 }

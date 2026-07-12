@@ -1,12 +1,16 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Modal, ModalButton } from '../../components/Modal';
+import { SearchSelect } from '../../components/SearchSelect';
+import { StatusBadge } from '../../components/StatusBadge';
 import { useAuth } from '../../auth/AuthContext';
-import { Plus, Trash2, Pencil, X, Eye, Save } from 'lucide-react';
+import { Plus, Trash2, Pencil, Eye } from 'lucide-react';
 
 type Role = { id: string; tenant_id: string; name: string; key: string; scope: string; status: string; created_at: string };
 type Permission = { id: string; key: string; description: string };
 type RoleDetail = Role & { permissions: Permission[] };
+type Tenant = { id: string; name: string; slug: string; status: string };
 
 const CATEGORIES = ['users', 'roles', 'permissions', 'tenants', 'providers', 'contacts', 'campaigns', 'templates', 'notifications', 'audit', 'api_keys', 'channels', 'features', 'settings', 'groups'];
 
@@ -27,6 +31,10 @@ export function RolesPage() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
+  const [scope, setScope] = useState<'tenant'|'platform'>('tenant');
+  const [tenantId, setTenantId] = useState('');
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [createPerms, setCreatePerms] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -40,14 +48,16 @@ export function RolesPage() {
     list<Permission>('/admin/api/v1/permissions').then((r) => setAllPerms(r.data)),
   ]).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r)=>setTenants(r.data.filter((t)=>t.status==='active'))).catch(()=>{}); }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSaving(true); setError(''); setMessage('');
     try {
-      await apiRequest('/admin/api/v1/roles', { method: 'POST', body: JSON.stringify({ name, key }) });
+      const created = await apiRequest<{id:string}>('/admin/api/v1/roles', { method: 'POST', body: JSON.stringify({ name, key, scope, ...(scope==='tenant'&&isPlatform?{tenant_id:tenantId}:{}) }) });
+      if (createPerms.size) await apiRequest(`/admin/api/v1/roles/${created.id}/permissions`, { method: 'PUT', body: JSON.stringify({ permission_ids: Array.from(createPerms) }) });
       setName(''); setKey('');
+      setScope('tenant'); setTenantId(''); setCreatePerms(new Set());
       setShowForm(false); setMessage('Role created');
       load();
     } catch (err) { setError(err instanceof Error ? err.message : 'Create failed'); }
@@ -92,6 +102,7 @@ export function RolesPage() {
   function togglePerm(pid: string) {
     setEditPerms((prev) => { const next = new Set(prev); if (next.has(pid)) next.delete(pid); else next.add(pid); return next; });
   }
+  function toggleCreatePerm(pid: string) { setCreatePerms((old)=>{const next=new Set(old);next.has(pid)?next.delete(pid):next.add(pid);return next;}); }
 
   const groupedPerms: Record<string, Permission[]> = {};
   for (const p of allPerms) {
@@ -100,18 +111,11 @@ export function RolesPage() {
     groupedPerms[cat].push(p);
   }
 
-  return (
+  const editingRole = items.find((item) => item.id === editingId);
+  return (<>
     <Panel title="Roles" actions={can('roles.manage') ? <button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Create Role</>}</button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
-
-      {showForm && (
-        <form onSubmit={submit} className="mb-6 max-w-lg space-y-3 rounded-md border border-slate-200 p-4">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Role name" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="Role key (e.g. tenant_admin)" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 text-sm" required />
-          <button disabled={saving} className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60">{saving ? 'Saving...' : 'Create'}</button>
-        </form>
-      )}
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
@@ -125,41 +129,10 @@ export function RolesPage() {
           <tbody>
             {items.map((item) => (
               <tr key={item.id} className="border-b border-slate-100">
-                {editingId === item.id ? (
-                  <>
-                    <td className="py-3" colSpan={4}>
-                      <div className="space-y-2">
-                        <input value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full rounded border px-2 py-1 text-xs" placeholder="Role name" />
-                        <div className="max-h-48 overflow-y-auto space-y-1">
-                          {Object.entries(groupedPerms).map(([cat, perms]) => (
-                            <div key={cat}>
-                              <p className="text-xs font-semibold uppercase text-slate-400 mb-1">{cat}</p>
-                              <div className="flex flex-wrap gap-2 ml-1">
-                                {perms.map((p) => (
-                                  <label key={p.id} className="flex items-center gap-1 text-xs">
-                                    <input type="checkbox" checked={editPerms.has(p.id)} onChange={() => togglePerm(p.id)} className="rounded" />
-                                    {p.key}
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="flex gap-1">
-                        <button onClick={() => saveEdit(item.id)} disabled={saving} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-green-600 hover:bg-green-50"><Save size={12} />Save</button>
-                        <button onClick={() => setEditingId(null)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"><X size={12} />Cancel</button>
-                      </div>
-                    </td>
-                  </>
-                ) : (
-                  <>
                     <td className="py-3 font-medium">{item.name}</td>
                     <td>{item.key}</td>
                     <td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.scope === 'platform' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{item.scope}</span></td>
-                    <td>{item.status}</td>
+                    <td><StatusBadge status={item.status}/></td>
                     <td>
                       <div className="flex gap-1">
                         <button onClick={() => viewRole(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button>
@@ -167,24 +140,19 @@ export function RolesPage() {
                         {can('roles.manage') && <button onClick={() => remove(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={12} />Delete</button>}
                       </div>
                     </td>
-                  </>
-                )}
               </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      {viewDetail && viewingId && (
-        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-semibold">{viewDetail.name}</h3>
-            <button onClick={() => { setViewingId(null); setViewDetail(null); }} className="text-xs text-slate-500 hover:underline">Close</button>
-          </div>
-          <div className="grid grid-cols-2 gap-2 mb-3">
+    </Panel>
+    {showForm && <Modal title="Create role" description="Define its scope and select the permissions granted by this role." onClose={()=>setShowForm(false)} footer={<><ModalButton onClick={()=>setShowForm(false)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving||(isPlatform&&scope==='tenant'&&!tenantId)} onClick={()=>document.getElementById('role-create-form')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))}>{saving?'Creating...':'Create role'}</ModalButton></>}><form id="role-create-form" onSubmit={submit} className="space-y-5 px-6 py-5"><div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm"><span className="mb-1 block font-medium">Role name</span><input value={name} onChange={(e)=>setName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Role key</span><input value={key} onChange={(e)=>setKey(e.target.value)} placeholder="tenant_admin" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 font-mono" required/></label></div>{isPlatform&&<div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm"><span className="mb-1 block font-medium">Scope</span><SearchSelect value={scope} onChange={(v)=>{setScope(v as 'tenant'|'platform');if(v==='platform')setTenantId('')}} options={[{value:'tenant',label:'Tenant — limited to one workspace'},{value:'platform',label:'Platform — available globally'}]}/></label>{scope==='tenant'&&<label className="block text-sm"><span className="mb-1 block font-medium">Tenant</span><SearchSelect value={tenantId} onChange={setTenantId} placeholder="Select tenant" options={tenants.map((t)=>({value:t.id,label:`${t.name} (${t.slug})`}))}/></label>}</div>}<div><div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium">Permissions</span><button type="button" onClick={()=>setCreatePerms(createPerms.size===allPerms.length?new Set():new Set(allPerms.map((p)=>p.id)))} className="text-xs font-semibold text-blue-600">{createPerms.size===allPerms.length?'Clear all':'Select all'}</button></div><div className="max-h-[38vh] space-y-4 overflow-y-auto rounded-lg border border-slate-200 p-4">{Object.entries(groupedPerms).map(([cat,perms])=><section key={cat}><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{cat.replace(/_/g,' ')}</h3><div className="grid gap-2 sm:grid-cols-2">{perms.map((p)=><label key={p.id} className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-xs ${createPerms.has(p.id)?'border-blue-200 bg-blue-50':'border-slate-200'}`}><input type="checkbox" checked={createPerms.has(p.id)} onChange={()=>toggleCreatePerm(p.id)} className="rounded"/><span><b className="block font-mono">{p.key}</b><span className="text-slate-500">{p.description}</span></span></label>)}</div></section>)}</div></div></form></Modal>}
+    {editingRole && <Modal title="Edit role" description="Update the role name and its permission policy." onClose={()=>setEditingId(null)} footer={<><ModalButton onClick={()=>setEditingId(null)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={()=>saveEdit(editingRole.id)}>{saving?'Saving...':'Save changes'}</ModalButton></>}><div className="space-y-5 px-6 py-5"><label className="block text-sm"><span className="mb-1 block font-medium">Role name</span><input value={editName} onChange={(e)=>setEditName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label><div className="max-h-[50vh] space-y-4 overflow-y-auto rounded-lg border border-slate-200 p-4">{Object.entries(groupedPerms).map(([cat,perms])=><section key={cat}><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{cat}</h3><div className="grid gap-2 sm:grid-cols-2">{perms.map((p)=><label key={p.id} className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-xs ${editPerms.has(p.id)?'border-blue-200 bg-blue-50':'border-slate-200'}`}><input type="checkbox" checked={editPerms.has(p.id)} onChange={()=>togglePerm(p.id)} className="rounded"/><span><b className="block font-mono text-slate-800">{p.key}</b><span className="text-slate-500">{p.description}</span></span></label>)}</div></section>)}</div></div></Modal>}
+    {viewDetail && viewingId && <Modal title={viewDetail.name} description="Role configuration and effective permissions." onClose={()=>{setViewingId(null);setViewDetail(null)}} footer={<><ModalButton onClick={()=>{setViewingId(null);setViewDetail(null)}}>Close</ModalButton>{can('roles.manage')&&<ModalButton variant="primary" onClick={()=>{const role=viewDetail;setViewingId(null);setViewDetail(null);startEdit(role)}}>Edit role</ModalButton>}</>}><div className="px-6 py-5 text-sm"><div className="mb-4 grid grid-cols-2 gap-3">
             <div><span className="text-slate-500">Key:</span> {viewDetail.key}</div>
             <div><span className="text-slate-500">Scope:</span> {viewDetail.scope}</div>
-            <div><span className="text-slate-500">Status:</span> {viewDetail.status}</div>
+            <div><span className="text-slate-500">Status:</span> <StatusBadge status={viewDetail.status}/></div>
             <div><span className="text-slate-500">Created:</span> {viewDetail.created_at}</div>
           </div>
           {viewDetail.permissions && viewDetail.permissions.length > 0 && (
@@ -197,8 +165,6 @@ export function RolesPage() {
               </div>
             </div>
           )}
-        </div>
-      )}
-    </Panel>
-  );
+        </div></Modal>}
+  </>);
 }

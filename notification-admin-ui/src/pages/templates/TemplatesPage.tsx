@@ -1,12 +1,12 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { SearchSelect } from '../../components/SearchSelect';
 import { useAuth } from '../../auth/AuthContext';
 import {
   AlertTriangle,
   Braces,
   CheckCircle2,
-  ChevronDown,
   Eye,
   FileText,
   Mail,
@@ -208,23 +208,12 @@ export function TemplatesPage() {
           </div>
           <div className="template-filter-control">
             <label htmlFor="template-channel">Channel</label>
-            <div className="template-control-select">
-              <select id="template-channel" value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}>
-                <option value="">All channels</option><option value="email">Email</option><option value="sms">SMS</option><option value="fcm">FCM</option>
-              </select>
-              <ChevronDown aria-hidden="true" size={15} />
-            </div>
+            <SearchSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'',label:'All channels'},{value:'email',label:'Email'},{value:'sms',label:'SMS'},{value:'fcm',label:'FCM'}]}/>
           </div>
           {isPlatform && (
             <div className="template-filter-control template-tenant-control">
               <label htmlFor="template-tenant">Tenant</label>
-              <div className="template-control-select">
-                <select id="template-tenant" value={tenantFilter} onChange={(e) => setTenantFilter(e.target.value)}>
-                  <option value="">All tenants</option>
-                  {tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
-                </select>
-                <ChevronDown aria-hidden="true" size={15} />
-              </div>
+              <SearchSelect value={tenantFilter} onChange={setTenantFilter} options={[{value:'',label:'All tenants'},...tenants.map((tenant)=>({value:tenant.id,label:tenant.name}))]}/>
             </div>
           )}
           {(search || channelFilter || tenantFilter) && (
@@ -269,10 +258,10 @@ export function TemplatesPage() {
           <form onSubmit={saveTemplate}>
             <div className="max-h-[calc(92vh-160px)] space-y-5 overflow-y-auto px-6 py-5">
               {error && <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"><AlertTriangle className="mt-0.5 shrink-0" size={15} />{error}</div>}
-              {isPlatform && modal.mode === 'create' && <FormField label="Tenant" required hint="The tenant that owns this template."><select value={form.tenantId} onChange={(e) => setForm({ ...form, tenantId: e.target.value })} className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm" required><option value="">Select a tenant</option>{tenants.filter((tenant) => tenant.status === 'active').map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></FormField>}
+              {isPlatform && modal.mode === 'create' && <FormField label="Tenant" required hint="The tenant that owns this template."><SearchSelect value={form.tenantId} onChange={(value)=>setForm({...form,tenantId:value})} placeholder="Select a tenant" options={tenants.filter((tenant)=>tenant.status==='active').map((tenant)=>({value:tenant.id,label:tenant.name}))}/></FormField>}
               <div className="grid gap-5 md:grid-cols-2">
                 <FormField label="Template key" required hint="Stable identifier used by the API."><input value={form.templateKey} onChange={(e) => setForm({ ...form, templateKey: e.target.value })} placeholder="order_confirmation" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm" required /></FormField>
-                <FormField label="Channel" required hint="Delivery channel for this content."><select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })} className="focus-ring w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm" required><option value="email">Email</option><option value="sms">SMS</option><option value="fcm">FCM push</option></select></FormField>
+                <FormField label="Channel" required hint="Delivery channel for this content."><SearchSelect value={form.channel} onChange={(value)=>setForm({...form,channel:value})} options={[{value:'email',label:'Email'},{value:'sms',label:'SMS'},{value:'fcm',label:'FCM push'}]}/></FormField>
               </div>
               <FormField label="Subject" hint={form.channel === 'email' ? 'Email subject line. Variables are supported.' : 'Optional for this channel.'}><input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Your order {{order_id}} is confirmed" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></FormField>
               <FormField label="Message body" required hint="Use double braces for variables, for example {{customer_name}}."><textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={9} placeholder="Hello {{customer_name}},\n\nYour notification content goes here." className="focus-ring w-full resize-y rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm leading-6" required /></FormField>

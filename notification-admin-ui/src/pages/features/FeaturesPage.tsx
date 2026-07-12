@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { SearchSelect } from '../../components/SearchSelect';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, Layers3, Search, Users } from 'lucide-react';
 
@@ -42,7 +43,7 @@ export function FeaturesPage() {
         </div>
         <div className="flex gap-2">
           <label className="relative block min-w-64"><Search className="absolute left-3 top-2.5 text-slate-400" size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search features" className="focus-ring w-full rounded-md border border-slate-300 py-2 pl-9 pr-3 text-sm" /></label>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className="focus-ring rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"><option value="">All categories</option>{categories.map((value) => <option key={value}>{value}</option>)}</select>
+          <SearchSelect className="w-56" value={category} onChange={setCategory} placeholder="All categories" options={[{value:'',label:'All categories'},...categories.map((value)=>({value,label:value}))]}/>
         </div>
       </div>
 

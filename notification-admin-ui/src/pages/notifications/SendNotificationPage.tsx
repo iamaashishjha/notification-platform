@@ -2,12 +2,13 @@ import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { useAuth } from '../../auth/AuthContext';
+import { SearchSelect } from '../../components/SearchSelect';
 
 type TenantOption = { id: string; name: string; slug: string };
 type ContactOption = { id: string; name: string; email: string; phone: string };
 type GroupOption = { id: string; name: string };
 type TemplateOption = { id: string; template_key: string; name: string };
-type ChannelOption = { channel: string };
+type ChannelOption = { channel: string; enabled: boolean };
 
 type RecipientMode = 'contact' | 'group' | 'direct_email' | 'direct_phone' | 'fcm_token' | 'fcm_topic' | 'websocket_user' | 'in_app_user';
 
@@ -65,9 +66,11 @@ export function SendNotificationPage() {
       list<ContactOption>(`/admin/api/v1/contacts?tenant_id=${effectiveTenant}`).then((r) => setContacts(r.data)).catch(() => {}),
       list<GroupOption>(`/admin/api/v1/groups?tenant_id=${effectiveTenant}`).then((r) => setGroups(r.data)).catch(() => {}),
       list<TemplateOption>(`/admin/api/v1/templates?tenant_id=${effectiveTenant}`).then((r) => setTemplates(r.data)).catch(() => {}),
-      list<ChannelOption>(`/admin/api/v1/channels?tenant_id=${effectiveTenant}`).then((r) => setAvailableChannels([...new Set(r.data.map((c: any) => c.channel))])).catch(() => setAvailableChannels(['email', 'sms', 'fcm', 'websocket'])),
+      list<ChannelOption>(`/admin/api/v1/channels?tenant_id=${effectiveTenant}`).then((r) => setAvailableChannels([...new Set(r.data.filter((c) => c.enabled).map((c) => c.channel))])).catch(() => setAvailableChannels([])),
     ]).finally(() => setLoadingTenant(false));
   }, [effectiveTenant]);
+
+  useEffect(() => { setSelectedChannels((current) => current.filter((channel) => availableChannels.includes(channel))); }, [availableChannels]);
 
   function toggleChannel(ch: string) {
     setSelectedChannels((prev) => prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]);
@@ -134,10 +137,7 @@ export function SendNotificationPage() {
         {isPlatform ? (
           <label className="block text-sm">
             <span className="mb-1 block font-medium">Tenant</span>
-            <select value={tenantId} onChange={(e) => setTenantId(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-              <option value="">-- Select Tenant --</option>
-              {tenants.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>)}
-            </select>
+            <SearchSelect value={tenantId} onChange={setTenantId} placeholder="Select tenant" options={tenants.map((t) => ({value:t.id,label:`${t.name} (${t.slug})`}))} />
           </label>
         ) : (
           <div className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -151,27 +151,19 @@ export function SendNotificationPage() {
           <>
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Recipient Mode</span>
-              <select value={mode} onChange={(e) => setMode(e.target.value as RecipientMode)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-                {RECIPIENT_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              <SearchSelect value={mode} onChange={(value) => setMode(value as RecipientMode)} options={RECIPIENT_MODES} />
             </label>
 
             {mode === 'contact' && (
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Contact</span>
-                <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-                  <option value="">-- Select Contact --</option>
-                  {contacts.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.email || c.phone})</option>)}
-                </select>
+                <SearchSelect value={contactId} onChange={setContactId} placeholder="Select contact" options={contacts.map((c) => ({value:c.id,label:`${c.name} (${c.email || c.phone})`}))} />
               </label>
             )}
             {mode === 'group' && (
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Group</span>
-                <select value={groupId} onChange={(e) => setGroupId(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-                  <option value="">-- Select Group --</option>
-                  {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                </select>
+                <SearchSelect value={groupId} onChange={setGroupId} placeholder="Select group" options={groups.map((g) => ({value:g.id,label:g.name}))} />
               </label>
             )}
             {mode !== 'contact' && mode !== 'group' && (
@@ -183,21 +175,18 @@ export function SendNotificationPage() {
 
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Template</span>
-              <select value={templateKey} onChange={(e) => setTemplateKey(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2">
-                <option value="">-- None (event-only) --</option>
-                {templates.map((t) => <option key={t.id} value={t.template_key}>{t.name} ({t.template_key})</option>)}
-              </select>
+              <SearchSelect value={templateKey} onChange={setTemplateKey} placeholder="No template (event only)" options={[{value:'',label:'No template (event only)'}, ...templates.map((t) => ({value:t.template_key,label:`${t.name} (${t.template_key})`}))]} />
             </label>
 
             <label className="block text-sm">
-              <span className="mb-1 block font-medium">Channels</span>
-              <div className="flex flex-wrap gap-3">
+              <div className="mb-2 flex items-center justify-between"><span className="font-medium">Delivery channels</span><button type="button" disabled={!availableChannels.length} onClick={() => setSelectedChannels(selectedChannels.length === availableChannels.length ? [] : availableChannels)} className="text-xs font-semibold text-blue-600 hover:text-blue-700">{selectedChannels.length === availableChannels.length ? 'Clear all' : 'Select all'}</button></div>
+              <div className="grid gap-2 sm:grid-cols-2">
                 {availableChannels.map((ch) => (
-                  <label key={ch} className="flex items-center gap-1.5 text-sm">
-                    <input type="checkbox" checked={selectedChannels.includes(ch)} onChange={() => toggleChannel(ch)} className="rounded border-slate-300" />
-                    <span className="capitalize">{ch}</span>
+                  <label key={ch} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2.5 text-sm ${selectedChannels.includes(ch) ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white'}`}>
+                    <span className="font-medium capitalize">{ch.replace('_',' ')}</span><button type="button" role="switch" aria-checked={selectedChannels.includes(ch)} onClick={() => toggleChannel(ch)} className={`relative h-5 w-9 rounded-full transition ${selectedChannels.includes(ch) ? 'bg-blue-600' : 'bg-slate-300'}`}><span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${selectedChannels.includes(ch) ? 'left-[18px]' : 'left-0.5'}`}/></button>
                   </label>
                 ))}
+                {!availableChannels.length && <div className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">No globally active channels are enabled for this tenant.</div>}
               </div>
             </label>
           </>

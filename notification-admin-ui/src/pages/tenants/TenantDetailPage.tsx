@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { StatusBadge } from '../../components/StatusBadge';
 import { useAuth } from '../../auth/AuthContext';
-import { CheckCircle2, Info, Layers3, XCircle } from 'lucide-react';
+import { Activity, Bell, CheckCircle2, FileText, Info, KeyRound, Layers3, LayoutDashboard, Megaphone, Plug, ScrollText, Users, UserRound, XCircle } from 'lucide-react';
 
 type Tenant = { id: string; name: string; slug: string; status: string; created_at: string; updated_at: string };
 type Feature = { id: string; identifier: string; feature_key: string; name: string; description: string; category: string; enabled: boolean; created_at: string };
@@ -38,7 +39,7 @@ function OverviewSection({ overview }: { overview: Overview }) {
       <div className="grid grid-cols-2 gap-4 text-sm">
         <div><span className="text-slate-500">Name</span><p className="font-medium">{t.name}</p></div>
         <div><span className="text-slate-500">Slug</span><p className="font-medium">{t.slug}</p></div>
-        <div><span className="text-slate-500">Status</span><p className="font-medium">{t.status}</p></div>
+        <div><span className="text-slate-500">Status</span><p className="mt-1"><StatusBadge status={t.status}/></p></div>
         <div><span className="text-slate-500">Created</span><p className="font-medium">{t.created_at}</p></div>
       </div>
       <div className="grid grid-cols-5 gap-4">
@@ -63,7 +64,7 @@ function GenericTable({ columns, rows }: { columns: { key: string; label: string
       <tbody>
         {rows.map((row, i) => (
           <tr key={row.id || i} className="border-b border-slate-100">
-            {columns.map((c) => <td key={c.key} className="py-2">{row[c.key] ?? '-'}</td>)}
+            {columns.map((c) => <td key={c.key} className="py-2">{c.key === 'status' || c.key === 'enabled' ? <StatusBadge status={row[c.key]} /> : row[c.key] ?? '-'}</td>)}
           </tr>
         ))}
       </tbody>
@@ -157,6 +158,7 @@ export function TenantDetailPage() {
   }
 
   const tabs = ['overview', isPlatform && 'features', isPlatform && 'channels', isPlatform && 'providers', 'contacts', 'groups', 'templates', 'campaigns', 'api-keys', 'audit'].filter(Boolean) as string[];
+  const tabMeta: Record<string, { label: string; icon: typeof Activity }> = { overview:{label:'Overview',icon:LayoutDashboard}, features:{label:'Capabilities',icon:Layers3}, channels:{label:'Channels',icon:Bell}, providers:{label:'Providers',icon:Plug}, contacts:{label:'Contacts',icon:UserRound}, groups:{label:'Groups',icon:Users}, templates:{label:'Templates',icon:FileText}, campaigns:{label:'Campaigns',icon:Megaphone}, 'api-keys':{label:'API keys',icon:KeyRound}, audit:{label:'Audit log',icon:ScrollText} };
 
   if (loading) return <Panel title="Tenant Detail"><div className="py-8 text-center text-slate-400">Loading...</div></Panel>;
   if (error) return <Panel title="Tenant Detail"><div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div></Panel>;
@@ -196,7 +198,7 @@ export function TenantDetailPage() {
           <tbody>
             {ov.channels.map((c) => (
               <tr key={c.id} className="border-b border-slate-100">
-                <td className="py-3 font-medium capitalize">{c.channel}</td><td>{c.enabled ? 'Yes' : 'No'}</td><td>{c.direction}</td><td>{c.rate_limit_per_second}</td><td>{c.daily_quota}</td>
+                <td className="py-3 font-medium capitalize">{c.channel}</td><td><StatusBadge status={c.enabled}/></td><td>{c.direction}</td><td>{c.rate_limit_per_second}</td><td>{c.daily_quota}</td>
                 <td><Toggle value={c.enabled} onChange={() => toggleChannelFn(c.id, !c.enabled)} /></td>
               </tr>
             ))}
@@ -219,7 +221,7 @@ export function TenantDetailPage() {
                   <thead className="border-b border-slate-200 text-slate-500"><tr><th className="py-1">Provider</th><th>Default</th><th>Status</th></tr></thead>
                   <tbody>
                     {prows.map((p) => (
-                      <tr key={p.id} className="border-b border-slate-100"><td className="py-2">{p.provider}</td><td>{p.is_default ? 'Yes' : 'No'}</td><td>{p.status}</td></tr>
+                      <tr key={p.id} className="border-b border-slate-100"><td className="py-2">{p.provider}</td><td><StatusBadge status={p.is_default}/></td><td><StatusBadge status={p.status}/></td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -241,21 +243,21 @@ export function TenantDetailPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:flex sm:items-center sm:justify-between">
         <div>
-          <button onClick={() => navigate('/tenants')} className="mb-1 text-sm text-blue-600 hover:underline">&larr; Back to Tenants</button>
-          <h1 className="text-xl font-semibold">{ov.tenant.name}</h1>
+          <button onClick={() => navigate('/tenants')} className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-600 hover:text-blue-700">&larr; Tenant directory</button>
+          <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 font-bold text-white">{ov.tenant.name.slice(0,2).toUpperCase()}</span><div><h1 className="text-xl font-semibold">{ov.tenant.name}</h1><p className="text-sm text-slate-500">{ov.tenant.slug} · Tenant administration workspace</p></div></div>
         </div>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${ov.tenant.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{ov.tenant.status}</span>
+        <StatusBadge status={ov.tenant.status}/>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
+      <nav className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm" aria-label="Tenant sections">
         {tabs.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`focus-ring whitespace-nowrap rounded-t-md px-4 py-2 text-sm font-medium capitalize ${tab === t ? 'border-b-2 border-blue-600 text-blue-700' : 'text-slate-500 hover:text-slate-700'}`}>{t.replace(/-/g, ' ')}</button>
+          <button key={t} onClick={() => setTab(t)} className={`focus-ring inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2.5 text-sm font-medium transition ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}>{(() => { const Icon = tabMeta[t].icon; return <Icon size={15}/>; })()}{tabMeta[t].label}</button>
         ))}
-      </div>
+      </nav>
 
-      <Panel title={tab.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}>
+      <Panel title={tabMeta[tab].label}>
         {renderTabContent()}
       </Panel>
     </div>

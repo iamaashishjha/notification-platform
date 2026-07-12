@@ -104,10 +104,10 @@ ON CONFLICT (tenant_id, channel) WHERE is_default = true AND status = 'active' D
 
 -- API keys
 INSERT INTO tenant_api_keys (tenant_id, name, key_hash, scopes_json, status)
-SELECT t.id, 'Sample API Key', encode(sha256(('sample_' || t.slug)::bytea), 'hex')::text, '["notifications:create", "devices:write", "in_app:read"]'::jsonb, 'active'
+SELECT t.id, t.name || ' API Key', encode(sha256(('sample_' || t.slug)::bytea), 'hex')::text, '["notifications:create", "devices:write", "in_app:read"]'::jsonb, 'active'
 FROM tenants t
 WHERE t.slug IN ('fintech','hrms','healthcare','logistics','edtech','realestate','travel','food','banking','insurance','social','gaming','iot','saas')
-ON CONFLICT (key_hash) DO NOTHING;
+ON CONFLICT (key_hash) DO UPDATE SET name = EXCLUDED.name, scopes_json = EXCLUDED.scopes_json, status = 'active';
 
 -- Fintech templates
 INSERT INTO notification_templates (tenant_id, template_key, channel, subject, body, status)

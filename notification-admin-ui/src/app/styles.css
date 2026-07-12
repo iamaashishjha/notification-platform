@@ -16,6 +16,19 @@ button, input, select, textarea {
   font: inherit;
 }
 
+.datatable-tools { display:flex; align-items:center; gap:8px; margin:0 0 12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc; color:#64748b; font-size:12px; }
+.datatable-search { display:flex; min-width:240px; flex:1; align-items:center; gap:8px; border:1px solid #cbd5e1; border-radius:6px; background:white; padding:0 10px; }
+.datatable-search input { height:36px; min-width:0; flex:1; border:0; outline:0; }
+.datatable-tools button, .datatable-size { height:36px; border:1px solid #cbd5e1; border-radius:6px; background:white; padding:0 10px; }
+.datatable-size { display:flex; align-items:center; gap:6px; white-space:nowrap; }.datatable-size input { width:42px; border:0; outline:0; }
+.datatable-tools button:disabled { opacity:.45; }
+.datatable-count { white-space:nowrap; }
+.datatable-sortable { cursor:pointer; user-select:none; }
+.datatable-sortable::after { content:' ↕'; color:#94a3b8; }
+.datatable-sortable[data-sort='asc']::after { content:' ↑'; color:#2563eb; }
+.datatable-sortable[data-sort='desc']::after { content:' ↓'; color:#2563eb; }
+@media (max-width:700px) { .datatable-tools { flex-wrap:wrap; } .datatable-search { flex-basis:100%; } }
+
 .focus-ring:focus {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
@@ -57,6 +70,7 @@ button, input, select, textarea {
 }
 
 .template-modal-panel.max-w-md { max-width: 448px; }
+.template-modal-panel.max-w-2xl { max-width: 672px; }
 .template-modal-panel.max-w-3xl { max-width: 768px; }
 
 .template-toolbar {

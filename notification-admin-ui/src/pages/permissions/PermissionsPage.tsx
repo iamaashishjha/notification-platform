@@ -17,7 +17,15 @@ export function PermissionsPage() {
   useEffect(() => {
     setLoading(true);
     list<Permission>('/admin/api/v1/permissions').then((res) => {
-      setItems(res.data.map((p: any) => ({ ...p, roles: typeof p.roles === 'string' ? JSON.parse(p.roles) : p.roles })));
+      setItems(res.data.map((p: any) => {
+        if (Array.isArray(p.roles)) return p;
+        if (typeof p.roles !== 'string') return { ...p, roles: [] };
+        try { return { ...p, roles: JSON.parse(p.roles) }; }
+        catch {
+          try { return { ...p, roles: JSON.parse(atob(p.roles)) }; }
+          catch { return { ...p, roles: [] }; }
+        }
+      }));
     }).catch((err) => setError(err.message)).finally(() => setLoading(false));
   }, []);
 
@@ -37,20 +45,21 @@ export function PermissionsPage() {
       ) : items.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No permissions found</div>
       ) : (
-        <div className="space-y-6">
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
           {Object.entries(categories).map(([cat, perms]) => (
-            <div key={cat}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{cat}</h3>
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-slate-200 text-slate-500">
-                  <tr><th className="py-2">Key</th><th>Description</th><th>Associated Roles</th></tr>
+            <section key={cat} className="border-b border-slate-200 last:border-b-0">
+              <h3 className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">{cat.replace(/_/g, ' ')}</h3>
+              <table className="w-full min-w-[900px] table-fixed text-left text-sm">
+                <colgroup><col className="w-[35%]" /><col className="w-[30%]" /><col className="w-[35%]" /></colgroup>
+                <thead className="border-b border-slate-200 bg-white text-xs uppercase tracking-wide text-slate-500">
+                  <tr><th className="px-4 py-2.5">Key</th><th className="px-4 py-2.5">Description</th><th className="px-4 py-2.5">Associated roles</th></tr>
                 </thead>
                 <tbody>
                   {perms.map((p) => (
-                    <tr key={p.id} className="border-b border-slate-100">
-                      <td className="py-2 font-mono text-xs">{p.key}</td>
-                      <td className="py-2 text-xs text-slate-500">{p.description}</td>
-                      <td className="py-2">
+                    <tr key={p.id} className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-mono text-xs font-medium text-slate-800">{p.key}</td>
+                      <td className="px-4 py-3 text-xs text-slate-500">{p.description}</td>
+                      <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           {p.roles && p.roles.length > 0 ? p.roles.map((r) => (
                             <span key={r.id} className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.scope === 'platform' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -63,7 +72,7 @@ export function PermissionsPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </section>
           ))}
         </div>
       )}

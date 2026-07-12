@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Modal, ModalButton } from '../../components/Modal';
 import { useAuth } from '../../auth/AuthContext';
 import { Eye } from 'lucide-react';
 
@@ -19,26 +20,9 @@ export function AuditLogsPage() {
     list<AuditLog>('/admin/api/v1/audit-logs').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false));
   }, []);
 
-  return (
+  return (<>
     <Panel title="Audit Logs">
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-
-      {selected && (
-        <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-semibold">Audit Detail</h3>
-            <button onClick={() => setSelected(null)} className="text-xs text-slate-500 hover:underline">Close</button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><span className="text-slate-500">Action:</span> {selected.action}</div>
-            <div><span className="text-slate-500">Actor:</span> {selected.actor_type} ({selected.actor_user_id || 'system'})</div>
-            <div><span className="text-slate-500">Resource:</span> {selected.resource_type} {selected.resource_id ? `#${selected.resource_id}` : ''}</div>
-            <div><span className="text-slate-500">IP:</span> {selected.ip_address || '-'}</div>
-            <div><span className="text-slate-500">Time:</span> {selected.created_at}</div>
-            {isPlatform && <div><span className="text-slate-500">Tenant:</span> {selected.tenant_name || '-'}</div>}
-          </div>
-        </div>
-      )}
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
@@ -59,12 +43,13 @@ export function AuditLogsPage() {
                 <td>{item.ip_address || '-'}</td>
                 <td>{item.created_at}</td>
                 {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
-                <td><button onClick={() => setSelected(selected?.id === item.id ? null : item)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />{selected?.id === item.id ? 'Hide' : 'View'}</button></td>
+                <td><button onClick={() => setSelected(item)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button></td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
     </Panel>
-  );
+    {selected&&<Modal title="Audit event" description="Immutable activity record and request context." onClose={()=>setSelected(null)} width="max-w-2xl" footer={<ModalButton onClick={()=>setSelected(null)}>Close</ModalButton>}><dl className="grid gap-4 px-6 py-5 sm:grid-cols-2">{[['Action',selected.action],['Actor',`${selected.actor_type} (${selected.actor_user_id||'system'})`],['Resource',`${selected.resource_type}${selected.resource_id?` #${selected.resource_id}`:''}`],['IP address',selected.ip_address||'-'],['Timestamp',selected.created_at],...(isPlatform?[['Tenant',selected.tenant_name||'-']]:[])].map(([label,value])=><div key={label} className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</dt><dd className="mt-1 break-all text-sm font-medium">{value}</dd></div>)}</dl></Modal>}
+  </>);
 }

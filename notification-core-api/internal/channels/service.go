@@ -23,6 +23,7 @@ func (s Service) ValidateSend(ctx context.Context, tenantID, channel, direction 
 	const q = `
 SELECT tc.enabled, tc.direction, COALESCE(tpc.provider, '')
 FROM tenant_channels tc
+JOIN platform_channels pc ON pc.channel = tc.channel AND pc.enabled = true
 LEFT JOIN tenant_provider_configs tpc ON tpc.tenant_id = tc.tenant_id AND tpc.channel = tc.channel AND tpc.is_default = true AND tpc.status = 'active'
 WHERE tc.tenant_id = $1 AND tc.channel = $2`
 	var cfg Config
