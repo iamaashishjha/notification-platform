@@ -10,6 +10,12 @@ PID_DIR="$RUNTIME_DIR/pids"
 BACKEND_ENV="$BACKEND_DIR/.env.local"
 FRONTEND_ENV="$FRONTEND_DIR/.env.local"
 PROVIDER_CONFIG="$BACKEND_DIR/config/providers.local.json"
+COMMAND=""
+PROVIDER_MODE_OPTION=""
+PACKAGE_MANAGER_OPTION=""
+MIGRATE_FIRST_OPTION=""
+WORKER_OPTION=""
+SEED_OPTION=""
 
 mkdir -p "$LOG_DIR" "$PID_DIR" "$BACKEND_DIR/config"
 
@@ -65,6 +71,11 @@ choose_package_manager() {
   has yarn && available+=(yarn)
   ((${#available[@]})) || die "Install npm, pnpm, or yarn first."
   default="${available[0]}"
+  if [[ -n "$PACKAGE_MANAGER_OPTION" ]]; then
+    has "$PACKAGE_MANAGER_OPTION" || die "$PACKAGE_MANAGER_OPTION is not installed."
+    PACKAGE_MANAGER="$PACKAGE_MANAGER_OPTION"
+    return
+  fi
   printf 'Available package managers: %s\n' "${available[*]}"
   read -r -p "Package manager [$default]: " choice
   choice="${choice:-$default}"
@@ -107,12 +118,32 @@ start_background() {
   ok "$name started (PID $pid)."
 }
 
+stop_background_processes() {
+  local pid_file name pid
+  shopt -s nullglob
+  for pid_file in "$PID_DIR"/*.pid; do
+    name="$(basename "$pid_file" .pid)"
+    pid="$(<"$pid_file")"
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      info "Stopping runner-managed $name (PID $pid)"
+      kill "$pid" 2>/dev/null || true
+      for _ in {1..20}; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.25
+      done
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+  done
+  shopt -u nullglob
+}
+
 seed_tenants() {
   check_docker
   info "Running database migrations first"
   (cd "$ROOT_DIR" && docker compose --profile api run --rm -T migrate </dev/null)
 
-  local choice slug slugs
+  local choice slug="" slugs
   cat <<'EOF'
 
 Seed options
@@ -121,8 +152,17 @@ Seed options
 3. Seed all sample tenants (ecommerce + 14 industry tenants)
 4. Load local_seed.sql (ecommerce sample tenant only)
 EOF
-  read -r -p "Choose [4]: " choice
-  choice="${choice:-4}"
+  if [[ -n "$SEED_OPTION" ]]; then
+    case "$SEED_OPTION" in
+      fresh) choice=1 ;;
+      all) choice=3 ;;
+      local) choice=4 ;;
+      *) choice=2; slug="$SEED_OPTION" ;;
+    esac
+  else
+    read -r -p "Choose [4]: " choice
+    choice="${choice:-4}"
+  fi
 
   case "$choice" in
     1)
@@ -153,7 +193,7 @@ SQL
       ;;
     2|3)
       slugs=("fintech" "hrms" "healthcare" "logistics" "edtech" "realestate" "travel" "food" "banking" "insurance" "social" "gaming" "iot" "saas")
-      if [[ "$choice" == 2 ]]; then
+      if [[ "$choice" == 2 && -z "$slug" ]]; then
         info "Which sample tenant to seed?"
         cat <<'TENANTS'
 1. fintech        - Fintech Payments
@@ -176,6 +216,8 @@ TENANTS
           1|2|3|4|5|6|7|8|9|10|11|12|13|14) idx=$((slug - 1)); slug="${slugs[$idx]}" ;;
           *) die "Invalid choice." ;;
         esac
+      elif [[ "$choice" == 2 ]]; then
+        [[ " ${slugs[*]} " == *" $slug "* ]] || die "Unknown sample tenant: $slug"
       else
         slug="all"
       fi
@@ -374,7 +416,11 @@ EOF
 
 ask_provider_mode() {
   local answer
-  read -r -p "Use mock providers for local delivery? [Y/n]: " answer
+  if [[ -n "$PROVIDER_MODE_OPTION" ]]; then
+    answer="$PROVIDER_MODE_OPTION"
+  else
+    read -r -p "Use mock providers for local delivery? [Y/n]: " answer
+  fi
   if [[ "${answer,,}" == n ]]; then
     configure_providers
   else
@@ -414,6 +460,7 @@ full_docker() {
   check_docker
   ensure_root_env
   ask_provider_mode
+  stop_background_processes
   info "Building and starting the complete Docker stack"
   (cd "$ROOT_DIR" && docker compose --profile all up -d --build)
   ok "Compose started migrations and local seed data before the API."
@@ -438,7 +485,11 @@ hybrid_local() {
 
 backend_only() {
   local answer
-  read -r -p "Run migrations first using Docker? [y/N]: " answer
+  if [[ -n "$MIGRATE_FIRST_OPTION" ]]; then
+    answer="$MIGRATE_FIRST_OPTION"
+  else
+    read -r -p "Run migrations first using Docker? [y/N]: " answer
+  fi
   [[ "${answer,,}" == y ]] && run_migrations_and_seed
   start_api
   printf 'API: http://localhost:8080 | Log: %s/api.log | Stop: ./stop.sh\n' "$LOG_DIR"
@@ -446,8 +497,12 @@ backend_only() {
 
 workers_only() {
   local choice worker
-  read -r -p "Worker (router/scheduler/email/sms/fcm/websocket/retry/dead/all) [all]: " choice
-  choice="${choice:-all}"
+  if [[ -n "$WORKER_OPTION" ]]; then
+    choice="$WORKER_OPTION"
+  else
+    read -r -p "Worker (router/scheduler/email/sms/fcm/websocket/retry/dead/all) [all]: " choice
+    choice="${choice:-all}"
+  fi
   case "$choice" in
     all) start_all_workers ;;
     router|scheduler|email|sms|fcm|websocket|retry|dead) start_worker "$choice" ;;
@@ -476,10 +531,86 @@ Queue note: RabbitMQ is the implemented default. Kafka is a future/advanced plac
 EOF
 }
 
+show_usage() {
+  cat <<'EOF'
+Usage: ./run.sh [command] [options]
+
+Commands (names or menu numbers):
+  docker|1       Run the complete Docker Compose stack
+  hybrid|2       Run infrastructure in Docker and apps locally
+  infra|3        Run infrastructure services only
+  api|4          Run the Go API locally
+  admin|5        Run the React admin UI locally
+  workers|6      Run workers locally
+  providers|7    Configure notification providers
+  seed|8         Run database seeds
+  test|9         Run local smoke tests
+  stop|10        Stop all services
+  help           Show this help
+
+Options:
+  --mock                 Use mock providers without prompting
+  --configure-providers  Open provider configuration instead of using mocks
+  --package-manager NAME Use npm, pnpm, or yarn without prompting
+  --migrate              Run migrations and seeds before the local API
+  --no-migrate           Start the local API without migrations
+  --worker NAME          Start one worker, or "all"
+  --seed MODE            Seed "fresh", "local", "all", or an industry slug
+
+Examples:
+  ./run.sh docker --mock
+  ./run.sh hybrid --mock --package-manager npm
+  ./run.sh api --migrate
+  ./run.sh workers --worker email
+  ./run.sh seed --seed fintech
+EOF
+}
+
+parse_args() {
+  while (($#)); do
+    case "$1" in
+      1|docker) COMMAND=1 ;;
+      2|hybrid) COMMAND=2 ;;
+      3|infra) COMMAND=3 ;;
+      4|api) COMMAND=4 ;;
+      5|admin) COMMAND=5 ;;
+      6|workers) COMMAND=6 ;;
+      7|providers) COMMAND=7 ;;
+      8|seed) COMMAND=8 ;;
+      9|test) COMMAND=9 ;;
+      10|stop) COMMAND=10 ;;
+      11|help|-h|--help) COMMAND=help ;;
+      --mock) PROVIDER_MODE_OPTION=y ;;
+      --configure-providers) PROVIDER_MODE_OPTION=n ;;
+      --migrate) MIGRATE_FIRST_OPTION=y ;;
+      --no-migrate) MIGRATE_FIRST_OPTION=n ;;
+      --package-manager|--worker|--seed)
+        (($# >= 2)) || die "$1 requires a value."
+        case "$1" in
+          --package-manager) PACKAGE_MANAGER_OPTION="$2" ;;
+          --worker) WORKER_OPTION="$2" ;;
+          --seed) SEED_OPTION="$2" ;;
+        esac
+        shift
+        ;;
+      *) die "Unknown option: $1 (run ./run.sh --help)" ;;
+    esac
+    shift
+  done
+}
+
 main() {
   local choice
-  show_menu
-  read -r -p "Choose an option: " choice
+  parse_args "$@"
+  if [[ "$COMMAND" == help ]]; then
+    show_usage
+    return
+  elif [[ -n "$COMMAND" ]]; then
+    choice="$COMMAND"
+  else
+    show_menu
+    read -r -p "Choose an option: " choice
+  fi
   case "$choice" in
     1) full_docker ;;
     2) hybrid_local ;;
