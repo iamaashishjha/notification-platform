@@ -7,7 +7,7 @@ import { SearchSelect } from '../../components/SearchSelect';
 type TenantOption = { id: string; name: string; slug: string };
 type ContactOption = { id: string; name: string; email: string; phone: string };
 type GroupOption = { id: string; name: string };
-type TemplateOption = { id: string; template_key: string; name: string };
+type TemplateOption = { id: string; template_key: string; channel: string; subject?: string };
 type ChannelOption = { channel: string; enabled: boolean };
 
 type RecipientMode = 'contact' | 'group' | 'direct_email' | 'direct_phone' | 'fcm_token' | 'fcm_topic' | 'websocket_user' | 'in_app_user';
@@ -175,7 +175,7 @@ export function SendNotificationPage() {
 
             <label className="block text-sm">
               <span className="mb-1 block font-medium">Template</span>
-              <SearchSelect value={templateKey} onChange={setTemplateKey} placeholder="No template (event only)" options={[{value:'',label:'No template (event only)'}, ...templates.map((t) => ({value:t.template_key,label:`${t.name} (${t.template_key})`}))]} />
+              <SearchSelect value={templateKey} onChange={setTemplateKey} placeholder="No template (event only)" options={[{value:'',label:'No template (event only)'}, ...templates.map((t) => ({value:t.template_key,label:`${t.subject?.trim() || t.template_key} (${t.channel || 'template'}: ${t.template_key})`}))]} />
             </label>
 
             <label className="block text-sm">
