@@ -61,21 +61,70 @@ perms AS (
     ON CONFLICT (key) DO NOTHING
     RETURNING id
 ),
-platform_role AS (
+role_seed AS (
     INSERT INTO roles (tenant_id, name, key, scope, status)
-    SELECT NULL, 'Platform Admin', 'platform_admin', 'platform', 'active'
-    WHERE NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id IS NULL AND key = 'platform_admin')
-    RETURNING id
-),
-tenant_role AS (
-    INSERT INTO roles (tenant_id, name, key, scope, status)
-    SELECT demo_tenant.id, 'Tenant Admin', 'tenant_admin', 'tenant', 'active' FROM demo_tenant
-    ON CONFLICT (tenant_id, key) DO UPDATE SET status = 'active'
+    SELECT NULL, role_name, role_key, role_scope, 'active'
+    FROM (VALUES
+        ('Platform Admin', 'platform_admin', 'platform'),
+        ('Platform Operator', 'platform_operator', 'platform'),
+        ('Platform Support', 'platform_support', 'platform'),
+        ('Tenant Admin', 'tenant_admin', 'tenant'),
+        ('Tenant Manager', 'tenant_manager', 'tenant'),
+        ('Tenant Support', 'tenant_support', 'tenant'),
+        ('Tenant Viewer', 'tenant_viewer', 'tenant')
+    ) AS defaults(role_name, role_key, role_scope)
+    WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id IS NULL AND r.key = defaults.role_key)
     RETURNING id
 )
 INSERT INTO role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
-WHERE r.key IN ('platform_admin', 'tenant_admin')
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON
+    r.key = 'platform_admin'
+    OR (r.key = 'platform_operator' AND p.key = ANY(ARRAY[
+        'tenants.view','tenants.update',
+        'users.view','users.create','users.update','users.assign_roles',
+        'roles.manage','permissions.manage',
+        'features.view','features.update','channels.view','channels.update',
+        'providers.view','providers.create','providers.update','providers.test',
+        'api_keys.view','audit_logs.view',
+        'notifications.view','notifications.send','notifications.retry','notifications.cancel',
+        'campaigns.view','campaigns.approve','campaigns.send','campaigns.cancel',
+        'settings.view','settings.update'
+    ]))
+    OR (r.key = 'platform_support' AND (
+        p.key IN ('notifications.view','notifications.send','providers.view','providers.test','audit_logs.view','settings.view')
+        OR p.key LIKE '%.view'
+    ))
+    OR (r.key = 'tenant_admin' AND p.key = ANY(ARRAY[
+        'users.view','users.create','users.update','users.delete','users.assign_roles',
+        'roles.manage','permissions.manage',
+        'features.view','features.update','channels.view','channels.update',
+        'providers.view','providers.create','providers.update','providers.delete','providers.test',
+        'api_keys.view','api_keys.create','api_keys.revoke',
+        'contacts.view','contacts.create','contacts.update','contacts.delete','contacts.manage',
+        'groups.view','groups.create','groups.update','groups.delete','groups.members.manage','groups.manage',
+        'templates.view','templates.create','templates.update','templates.delete','templates.manage',
+        'notifications.view','notifications.create','notifications.send','notifications.bulk_send','notifications.retry','notifications.cancel',
+        'campaigns.view','campaigns.create','campaigns.update','campaigns.approve','campaigns.send','campaigns.schedule','campaigns.cancel',
+        'audit_logs.view','settings.view','settings.update'
+    ]))
+    OR (r.key = 'tenant_manager' AND p.key = ANY(ARRAY[
+        'contacts.view','contacts.create','contacts.update','contacts.manage',
+        'groups.view','groups.create','groups.update','groups.members.manage','groups.manage',
+        'templates.view','templates.create','templates.update','templates.manage',
+        'notifications.view','notifications.create','notifications.send','notifications.bulk_send',
+        'campaigns.view','campaigns.create','campaigns.update','campaigns.schedule',
+        'settings.view'
+    ]))
+    OR (r.key = 'tenant_support' AND p.key = ANY(ARRAY[
+        'contacts.view','groups.view','templates.view','notifications.view','notifications.send','campaigns.view','audit_logs.view','settings.view'
+    ]))
+    OR (r.key = 'tenant_viewer' AND (
+        p.key IN ('audit_logs.view','settings.view')
+        OR p.key LIKE '%.view'
+    ))
+WHERE r.tenant_id IS NULL
 ON CONFLICT DO NOTHING;
 
 INSERT INTO user_roles (tenant_id, user_id, role_id)
@@ -87,7 +136,7 @@ INSERT INTO user_roles (tenant_id, user_id, role_id)
 SELECT t.id, u.id, r.id
 FROM tenants t
 JOIN users u ON u.email = 'tenant@example.com'
-JOIN roles r ON r.tenant_id = t.id AND r.key = 'tenant_admin'
+JOIN roles r ON r.tenant_id IS NULL AND r.key = 'tenant_admin'
 WHERE t.slug = 'ecommerce'
 ON CONFLICT DO NOTHING;
 

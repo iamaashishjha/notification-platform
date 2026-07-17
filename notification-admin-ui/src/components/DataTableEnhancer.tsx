@@ -18,9 +18,12 @@ export function DataTableEnhancer() {
       if (table.dataset.datatable || !table.tHead || !table.tBodies[0]) return;
       const headers = Array.from(table.tHead.rows[0]?.cells || []); if (!headers.length) return;
       table.dataset.datatable = 'true';
+      const host = table.parentElement!;
+      const panel = host.parentElement;
+      panel?.querySelectorAll<HTMLElement>(':scope > .datatable-tools').forEach((node) => node.remove());
       const tools = document.createElement('div'); tools.className = 'datatable-tools';
       tools.innerHTML = `<div class="datatable-search"><span>⌕</span><input aria-label="Filter table" placeholder="Search this list…" /></div><label class="datatable-size">Rows <input data-size type="number" min="1" max="100" value="25" aria-label="Rows per page" /></label><span class="datatable-count"></span><button type="button" data-prev>Previous</button><button type="button" data-next>Next</button>`;
-      const host = table.parentElement!; host.parentElement?.insertBefore(tools, host);
+      panel?.insertBefore(tools, host);
       const input = tools.querySelector<HTMLInputElement>('.datatable-search input')!, size = tools.querySelector<HTMLInputElement>('[data-size]')!; let page = 1, sort = -1, direction = 1;
       const render = () => {
         const rows = Array.from(table.tBodies[0].rows), query = input.value.toLowerCase().trim();
@@ -37,7 +40,13 @@ export function DataTableEnhancer() {
       headers.forEach((header,index)=>{if(/actions?/i.test(header.textContent||'')||!header.textContent?.trim())return;header.classList.add('datatable-sortable');header.title='Sort by this column';header.addEventListener('click',()=>{direction=sort===index?-direction:1;sort=index;headers.forEach((h)=>h.removeAttribute('data-sort'));header.dataset.sort=direction===1?'asc':'desc';render()})});
       render(); cleanups.push(()=>{tools.remove();delete table.dataset.datatable;Array.from(table.tBodies[0].rows).forEach((r)=>r.hidden=false)});
     };
-    const scan=()=>document.querySelectorAll<HTMLTableElement>('main table').forEach(enhance); scan();
+    const scan=()=>{
+      document.querySelectorAll<HTMLElement>('main .datatable-tools').forEach((tools) => {
+        const next = tools.nextElementSibling;
+        if (!next?.querySelector('table')) tools.remove();
+      });
+      document.querySelectorAll<HTMLTableElement>('main table').forEach(enhance);
+    }; scan();
     const observer=new MutationObserver(scan), main=document.querySelector('main'); if(main)observer.observe(main,{childList:true,subtree:true});
     return()=>{observer.disconnect();cleanups.forEach((cleanup)=>cleanup())};
   },[location.pathname]);

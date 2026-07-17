@@ -42,19 +42,23 @@ export function RolesPage() {
   const [editPerms, setEditPerms] = useState<Set<string>>(new Set());
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [viewDetail, setViewDetail] = useState<RoleDetail | null>(null);
+  const [roleView, setRoleView] = useState<'platform' | 'tenant_defaults' | 'tenant_custom'>('platform');
+  const [tenantFilter, setTenantFilter] = useState('');
 
   const load = () => { setLoading(true); Promise.all([
     list<Role>('/admin/api/v1/roles').then((r) => setItems(r.data)),
     list<Permission>('/admin/api/v1/permissions').then((r) => setAllPerms(r.data)),
   ]).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
 
-  useEffect(() => { load(); if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r)=>setTenants(r.data.filter((t)=>t.status==='active'))).catch(()=>{}); }, []);
+  useEffect(() => { load(); if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r)=>setTenants(r.data.filter((t)=>t.status==='active'))).catch(()=>{}); }, [isPlatform]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setSaving(true); setError(''); setMessage('');
     try {
-      const created = await apiRequest<{id:string}>('/admin/api/v1/roles', { method: 'POST', body: JSON.stringify({ name, key, scope, ...(scope==='tenant'&&isPlatform?{tenant_id:tenantId}:{}) }) });
+      const createScope = isPlatform && roleView === 'platform' ? 'platform' : 'tenant';
+      const createTenantId = isPlatform && roleView === 'tenant_custom' ? tenantId : '';
+      const created = await apiRequest<{id:string}>('/admin/api/v1/roles', { method: 'POST', body: JSON.stringify({ name, key, scope: createScope, ...(createTenantId?{tenant_id:createTenantId}:{}) }) });
       if (createPerms.size) await apiRequest(`/admin/api/v1/roles/${created.id}/permissions`, { method: 'PUT', body: JSON.stringify({ permission_ids: Array.from(createPerms) }) });
       setName(''); setKey('');
       setScope('tenant'); setTenantId(''); setCreatePerms(new Set());
@@ -112,26 +116,51 @@ export function RolesPage() {
   }
 
   const editingRole = items.find((item) => item.id === editingId);
+  const visibleRoles = isPlatform
+    ? items.filter((item) => {
+      if (roleView === 'platform') return item.scope === 'platform';
+      if (roleView === 'tenant_defaults') return item.scope === 'tenant' && !item.tenant_id;
+      return item.scope === 'tenant' && Boolean(item.tenant_id) && (!tenantFilter || item.tenant_id === tenantFilter);
+    })
+    : items.filter((item) => item.scope === 'tenant');
+  const createNeedsTenant = isPlatform && roleView === 'tenant_custom';
+  const createDisabled = saving || createNeedsTenant && !tenantId;
+  const tenantName = (tenantID: string) => tenants.find((tenant) => tenant.id === tenantID)?.name || '';
   return (<>
     <Panel title="Roles" actions={can('roles.manage') ? <button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Create Role</>}</button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
 
+      {isPlatform && (
+        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
+            <button type="button" onClick={() => { setRoleView('platform'); setTenantFilter(''); }} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${roleView === 'platform' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Platform roles</button>
+            <button type="button" onClick={() => { setRoleView('tenant_defaults'); setTenantFilter(''); }} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${roleView === 'tenant_defaults' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Default tenant roles</button>
+            <button type="button" onClick={() => setRoleView('tenant_custom')} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${roleView === 'tenant_custom' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Tenant custom roles</button>
+          </div>
+          {roleView === 'tenant_custom' && <label className="block w-full text-sm sm:w-72">
+            <span className="mb-1 block font-medium">Tenant filter</span>
+            <SearchSelect value={tenantFilter} onChange={setTenantFilter} placeholder="All tenants" options={[{value:'',label:'All tenants'},...tenants.map((tenant)=>({value:tenant.id,label:`${tenant.name} (${tenant.slug})`}))]} />
+          </label>}
+        </div>
+      )}
+
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
-      ) : items.length === 0 ? (
+      ) : visibleRoles.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No roles found</div>
       ) : (
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
-            <tr><th className="py-2">Name</th><th>Key</th><th>Scope</th><th>Status</th><th>Actions</th></tr>
+            <tr><th className="py-2">Name</th><th>Key</th><th>Scope</th>{isPlatform && <th>Tenant</th>}<th>Status</th><th>Actions</th></tr>
           </thead>
           <tbody>
-            {items.map((item) => (
+            {visibleRoles.map((item) => (
               <tr key={item.id} className="border-b border-slate-100">
                     <td className="py-3 font-medium">{item.name}</td>
                     <td>{item.key}</td>
                     <td><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.scope === 'platform' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{item.scope}</span></td>
+                    {isPlatform && <td className="text-xs text-slate-500">{item.tenant_id ? tenantName(item.tenant_id) || item.tenant_id : item.scope === 'tenant' ? 'All tenants' : '-'}</td>}
                     <td><StatusBadge status={item.status}/></td>
                     <td>
                       <div className="flex gap-1">
@@ -147,7 +176,7 @@ export function RolesPage() {
       )}
 
     </Panel>
-    {showForm && <Modal title="Create role" description="Define its scope and select the permissions granted by this role." onClose={()=>setShowForm(false)} footer={<><ModalButton onClick={()=>setShowForm(false)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving||(isPlatform&&scope==='tenant'&&!tenantId)} onClick={()=>document.getElementById('role-create-form')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))}>{saving?'Creating...':'Create role'}</ModalButton></>}><form id="role-create-form" onSubmit={submit} className="space-y-5 px-6 py-5"><div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm"><span className="mb-1 block font-medium">Role name</span><input value={name} onChange={(e)=>setName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Role key</span><input value={key} onChange={(e)=>setKey(e.target.value)} placeholder="tenant_admin" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 font-mono" required/></label></div>{isPlatform&&<div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm"><span className="mb-1 block font-medium">Scope</span><SearchSelect value={scope} onChange={(v)=>{setScope(v as 'tenant'|'platform');if(v==='platform')setTenantId('')}} options={[{value:'tenant',label:'Tenant — limited to one workspace'},{value:'platform',label:'Platform — available globally'}]}/></label>{scope==='tenant'&&<label className="block text-sm"><span className="mb-1 block font-medium">Tenant</span><SearchSelect value={tenantId} onChange={setTenantId} placeholder="Select tenant" options={tenants.map((t)=>({value:t.id,label:`${t.name} (${t.slug})`}))}/></label>}</div>}<div><div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium">Permissions</span><button type="button" onClick={()=>setCreatePerms(createPerms.size===allPerms.length?new Set():new Set(allPerms.map((p)=>p.id)))} className="text-xs font-semibold text-blue-600">{createPerms.size===allPerms.length?'Clear all':'Select all'}</button></div><div className="max-h-[38vh] space-y-4 overflow-y-auto rounded-lg border border-slate-200 p-4">{Object.entries(groupedPerms).map(([cat,perms])=><section key={cat}><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{cat.replace(/_/g,' ')}</h3><div className="grid gap-2 sm:grid-cols-2">{perms.map((p)=><label key={p.id} className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-xs ${createPerms.has(p.id)?'border-blue-200 bg-blue-50':'border-slate-200'}`}><input type="checkbox" checked={createPerms.has(p.id)} onChange={()=>toggleCreatePerm(p.id)} className="rounded"/><span><b className="block font-mono">{p.key}</b><span className="text-slate-500">{p.description}</span></span></label>)}</div></section>)}</div></div></form></Modal>}
+    {showForm && <Modal title="Create role" description="Define its permissions for the selected role group." onClose={()=>setShowForm(false)} footer={<><ModalButton onClick={()=>setShowForm(false)}>Cancel</ModalButton><ModalButton variant="primary" disabled={createDisabled} onClick={()=>document.getElementById('role-create-form')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))}>{saving?'Creating...':'Create role'}</ModalButton></>}><form id="role-create-form" onSubmit={submit} className="space-y-5 px-6 py-5"><div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm"><span className="mb-1 block font-medium">Role group</span><input value={isPlatform ? roleView === 'platform' ? 'Platform role' : roleView === 'tenant_defaults' ? 'Default tenant role' : 'Tenant custom role' : 'Tenant custom role'} readOnly className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500"/></label>{createNeedsTenant&&<label className="block text-sm"><span className="mb-1 block font-medium">Tenant</span><SearchSelect value={tenantId} onChange={setTenantId} placeholder="Select tenant" options={tenants.map((t)=>({value:t.id,label:`${t.name} (${t.slug})`}))}/></label>}</div><div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm"><span className="mb-1 block font-medium">Role name</span><input value={name} onChange={(e)=>setName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Role key</span><input value={key} onChange={(e)=>setKey(e.target.value)} placeholder={roleView === 'platform' ? 'platform_support' : 'tenant_support'} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2 font-mono" required/></label></div><div><div className="mb-2 flex items-center justify-between"><span className="text-sm font-medium">Permissions</span><button type="button" onClick={()=>setCreatePerms(createPerms.size===allPerms.length?new Set():new Set(allPerms.map((p)=>p.id)))} className="text-xs font-semibold text-blue-600">{createPerms.size===allPerms.length?'Clear all':'Select all'}</button></div><div className="max-h-[38vh] space-y-4 overflow-y-auto rounded-lg border border-slate-200 p-4">{Object.entries(groupedPerms).map(([cat,perms])=><section key={cat}><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{cat.replace(/_/g,' ')}</h3><div className="grid gap-2 sm:grid-cols-2">{perms.map((p)=><label key={p.id} className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-xs ${createPerms.has(p.id)?'border-blue-200 bg-blue-50':'border-slate-200'}`}><input type="checkbox" checked={createPerms.has(p.id)} onChange={()=>toggleCreatePerm(p.id)} className="rounded"/><span><b className="block font-mono">{p.key}</b><span className="text-slate-500">{p.description}</span></span></label>)}</div></section>)}</div></div></form></Modal>}
     {editingRole && <Modal title="Edit role" description="Update the role name and its permission policy." onClose={()=>setEditingId(null)} footer={<><ModalButton onClick={()=>setEditingId(null)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={()=>saveEdit(editingRole.id)}>{saving?'Saving...':'Save changes'}</ModalButton></>}><div className="space-y-5 px-6 py-5"><label className="block text-sm"><span className="mb-1 block font-medium">Role name</span><input value={editName} onChange={(e)=>setEditName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label><div className="max-h-[50vh] space-y-4 overflow-y-auto rounded-lg border border-slate-200 p-4">{Object.entries(groupedPerms).map(([cat,perms])=><section key={cat}><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{cat}</h3><div className="grid gap-2 sm:grid-cols-2">{perms.map((p)=><label key={p.id} className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-xs ${editPerms.has(p.id)?'border-blue-200 bg-blue-50':'border-slate-200'}`}><input type="checkbox" checked={editPerms.has(p.id)} onChange={()=>togglePerm(p.id)} className="rounded"/><span><b className="block font-mono text-slate-800">{p.key}</b><span className="text-slate-500">{p.description}</span></span></label>)}</div></section>)}</div></div></Modal>}
     {viewDetail && viewingId && <Modal title={viewDetail.name} description="Role configuration and effective permissions." onClose={()=>{setViewingId(null);setViewDetail(null)}} footer={<><ModalButton onClick={()=>{setViewingId(null);setViewDetail(null)}}>Close</ModalButton>{can('roles.manage')&&<ModalButton variant="primary" onClick={()=>{const role=viewDetail;setViewingId(null);setViewDetail(null);startEdit(role)}}>Edit role</ModalButton>}</>}><div className="px-6 py-5 text-sm"><div className="mb-4 grid grid-cols-2 gap-3">
             <div><span className="text-slate-500">Key:</span> {viewDetail.key}</div>

@@ -22,13 +22,13 @@ func (h Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 		q := `SELECT id::text, COALESCE(tenant_id::text,''), name, key, scope, status, created_at FROM roles`
 		args := []any{}
 		if tenantFilter != "" {
-			q += ` WHERE tenant_id = $1`
+			q += ` WHERE tenant_id = $1 OR (tenant_id IS NULL AND scope = 'tenant')`
 			args = append(args, tenantFilter)
 		}
 		q += ` ORDER BY created_at DESC LIMIT 100`
 		rows, err = h.db.Query(r.Context(), q, args...)
 	} else {
-		rows, err = h.db.Query(r.Context(), `SELECT id::text, COALESCE(tenant_id::text,''), name, key, scope, status, created_at FROM roles WHERE tenant_id = $1 AND scope != 'platform' ORDER BY created_at DESC LIMIT 100`, p.TenantID)
+		rows, err = h.db.Query(r.Context(), `SELECT id::text, COALESCE(tenant_id::text,''), name, key, scope, status, created_at FROM roles WHERE scope != 'platform' AND (tenant_id = $1 OR tenant_id IS NULL) ORDER BY created_at DESC LIMIT 100`, p.TenantID)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -60,7 +60,7 @@ func (h Handler) GetRole(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "role not found"})
 		return
 	}
-	if !p.IsPlatform && (tenantID != p.TenantID) {
+	if !p.IsPlatform && tenantID != "" && tenantID != p.TenantID {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
 		return
 	}
@@ -116,7 +116,7 @@ func (h Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "scope must be tenant or platform"})
 		return
 	}
-	if scope == "tenant" && tenantID == "" {
+	if scope == "tenant" && tenantID == "" && !p.IsPlatform {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_id is required for tenant-scoped roles"})
 		return
 	}
@@ -155,8 +155,8 @@ func (h Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 
 	var existingScope, existingTenantID string
 	h.db.QueryRow(r.Context(), `SELECT scope, COALESCE(tenant_id::text,'') FROM roles WHERE id = $1`, id).Scan(&existingScope, &existingTenantID)
-	if !p.IsPlatform && existingScope == "platform" {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot modify platform-scoped role"})
+	if !p.IsPlatform && (existingScope == "platform" || existingTenantID == "") {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot modify this role"})
 		return
 	}
 
@@ -181,7 +181,7 @@ func (h Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	query += " WHERE id = $" + strconv.Itoa(argN)
 	args = append(args, id)
 	if !p.IsPlatform {
-		query += " AND (tenant_id = $" + strconv.Itoa(argN+1) + " OR tenant_id IS NULL)"
+		query += " AND tenant_id = $" + strconv.Itoa(argN+1)
 		args = append(args, p.TenantID)
 	}
 	result, err := h.db.Exec(r.Context(), query, args...)
@@ -209,15 +209,15 @@ func (h Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 
 	var existingScope, existingTenantID string
 	h.db.QueryRow(r.Context(), `SELECT scope, COALESCE(tenant_id::text,'') FROM roles WHERE id = $1`, id).Scan(&existingScope, &existingTenantID)
-	if !p.IsPlatform && existingScope == "platform" {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot delete platform-scoped role"})
+	if !p.IsPlatform && (existingScope == "platform" || existingTenantID == "") {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot delete this role"})
 		return
 	}
 
 	query := `DELETE FROM roles WHERE id = $1`
 	args := []any{id}
 	if !p.IsPlatform {
-		query += " AND (tenant_id = $2 OR tenant_id IS NULL)"
+		query += " AND tenant_id = $2"
 		args = append(args, p.TenantID)
 	}
 	result, err := h.db.Exec(r.Context(), query, args...)
@@ -251,8 +251,8 @@ func (h Handler) SetRolePermissions(w http.ResponseWriter, r *http.Request) {
 
 	var existingScope, existingTenantID string
 	h.db.QueryRow(r.Context(), `SELECT scope, COALESCE(tenant_id::text,'') FROM roles WHERE id = $1`, roleID).Scan(&existingScope, &existingTenantID)
-	if !p.IsPlatform && existingScope == "platform" {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot modify platform-scoped role permissions"})
+	if !p.IsPlatform && (existingScope == "platform" || existingTenantID == "") {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot modify this role permissions"})
 		return
 	}
 
@@ -384,6 +384,10 @@ func (h Handler) AssignUserRole(w http.ResponseWriter, r *http.Request) {
 	h.db.QueryRow(r.Context(), `SELECT scope FROM roles WHERE id = $1`, req.RoleID).Scan(&roleScope)
 	if !p.IsPlatform && roleScope == "platform" {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot assign platform role"})
+		return
+	}
+	if roleScope == "tenant" && tenantID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_id is required for tenant role assignment"})
 		return
 	}
 

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"notification-core-api/internal/audit"
 	"notification-core-api/internal/auth"
 	"notification-core-api/internal/metrics"
 
@@ -181,6 +182,7 @@ func JWT(svc auth.Service) func(http.Handler) http.Handler {
 				return
 			}
 			ctx := context.WithValue(r.Context(), PrincipalKey, p)
+			ctx = audit.ContextWithSessionID(ctx, p.SessionID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

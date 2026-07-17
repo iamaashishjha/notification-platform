@@ -1,7 +1,7 @@
 import { ReactNode, useEffect } from 'react';
 import { X } from 'lucide-react';
 
-export function Modal({ title, description, children, footer, onClose, width = 'max-w-3xl' }: { title: string; description?: string; children: ReactNode; footer?: ReactNode; onClose: () => void; width?: 'max-w-md' | 'max-w-2xl' | 'max-w-3xl' }) {
+export function Modal({ title, description, children, footer, onClose, width = 'max-w-3xl' }: { title: string; description?: string; children: ReactNode; footer?: ReactNode; onClose: () => void; width?: 'max-w-md' | 'max-w-2xl' | 'max-w-3xl' | 'max-w-4xl' }) {
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
     document.addEventListener('keydown', closeOnEscape);

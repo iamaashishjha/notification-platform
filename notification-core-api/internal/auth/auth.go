@@ -22,6 +22,7 @@ type Principal struct {
 	TenantID    string   `json:"tenant_id,omitempty"`
 	Email       string   `json:"email"`
 	IsPlatform  bool     `json:"is_platform_admin"`
+	SessionID   string   `json:"session_id,omitempty"`
 	Permissions []string `json:"permissions"`
 }
 
@@ -88,11 +89,16 @@ LIMIT 1`
 		return TokenPair{}, p, err
 	}
 	p.Permissions = perms
-	accessToken, err := s.sign(p)
+	sessionID, err := security.RandomToken("sess", 24)
 	if err != nil {
 		return TokenPair{}, p, err
 	}
+	p.SessionID = sessionID
 	refreshToken, err := s.createSession(ctx, p, ipAddress, userAgent)
+	if err != nil {
+		return TokenPair{}, p, err
+	}
+	accessToken, err := s.sign(p)
 	if err != nil {
 		return TokenPair{}, p, err
 	}
@@ -114,6 +120,7 @@ func (s Service) VerifyJWT(tokenString string) (Principal, error) {
 		TenantID:   stringClaim(claims, "tenant_id"),
 		Email:      stringClaim(claims, "email"),
 		IsPlatform: boolClaim(claims, "is_platform_admin"),
+		SessionID:  stringClaim(claims, "session_id"),
 	}
 	if raw, ok := claims["permissions"].([]any); ok {
 		for _, item := range raw {
@@ -251,13 +258,13 @@ DO UPDATE SET version = permission_cache_versions.version + 1, updated_at = now(
 func (s Service) Refresh(ctx context.Context, refreshToken, ipAddress, userAgent string) (TokenPair, Principal, error) {
 	hash := security.HashSecret(refreshToken)
 	const q = `
-SELECT s.id::text, u.id::text, COALESCE(s.tenant_id::text, ''), u.email, u.is_platform_admin
+SELECT s.id::text, COALESCE(s.session_trace_id,''), u.id::text, COALESCE(s.tenant_id::text, ''), u.email, u.is_platform_admin
 FROM auth_sessions s
 JOIN users u ON u.id = s.user_id
 WHERE s.refresh_token_hash = $1 AND s.status = 'active' AND s.expires_at > now() AND u.status = 'active'`
-	var sessionID string
+	var authSessionID string
 	var p Principal
-	if err := s.db.QueryRow(ctx, q, hash).Scan(&sessionID, &p.UserID, &p.TenantID, &p.Email, &p.IsPlatform); err != nil {
+	if err := s.db.QueryRow(ctx, q, hash).Scan(&authSessionID, &p.SessionID, &p.UserID, &p.TenantID, &p.Email, &p.IsPlatform); err != nil {
 		return TokenPair{}, p, errors.New("invalid refresh token")
 	}
 	perms, err := s.EffectivePermissions(ctx, p.UserID, p.TenantID)
@@ -265,7 +272,7 @@ WHERE s.refresh_token_hash = $1 AND s.status = 'active' AND s.expires_at > now()
 		return TokenPair{}, p, err
 	}
 	p.Permissions = perms
-	if _, err := s.db.Exec(ctx, `UPDATE auth_sessions SET status = 'rotated', revoked_at = now(), revoked_reason = 'refresh_rotation', updated_at = now() WHERE id = $1`, sessionID); err != nil {
+	if _, err := s.db.Exec(ctx, `UPDATE auth_sessions SET status = 'rotated', revoked_at = now(), revoked_reason = 'refresh_rotation', updated_at = now() WHERE id = $1`, authSessionID); err != nil {
 		return TokenPair{}, p, err
 	}
 	accessToken, err := s.sign(p)
@@ -317,6 +324,7 @@ func (s Service) sign(p Principal) (string, error) {
 		"tenant_id":         p.TenantID,
 		"email":             p.Email,
 		"is_platform_admin": p.IsPlatform,
+		"session_id":        p.SessionID,
 		"permissions":       p.Permissions,
 		"exp":               time.Now().Add(s.accessTokenTTL).Unix(),
 		"iat":               time.Now().Unix(),
@@ -329,8 +337,16 @@ func (s Service) createSession(ctx context.Context, p Principal, ipAddress, user
 	if err != nil {
 		return "", err
 	}
-	const q = `INSERT INTO auth_sessions (user_id, tenant_id, refresh_token_hash, user_agent, ip_address, expires_at) VALUES ($1,$2,$3,$4,$5,$6)`
-	_, err = s.db.Exec(ctx, q, p.UserID, nullIfEmpty(p.TenantID), security.HashSecret(token), userAgent, ipAddress, time.Now().UTC().Add(s.refreshTokenTTL))
+	sessionID := p.SessionID
+	if sessionID == "" {
+		var err error
+		sessionID, err = security.RandomToken("sess", 24)
+		if err != nil {
+			return "", err
+		}
+	}
+	const q = `INSERT INTO auth_sessions (user_id, tenant_id, refresh_token_hash, user_agent, ip_address, expires_at, session_trace_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`
+	_, err = s.db.Exec(ctx, q, p.UserID, nullIfEmpty(p.TenantID), security.HashSecret(token), userAgent, ipAddress, time.Now().UTC().Add(s.refreshTokenTTL), sessionID)
 	if err != nil {
 		return "", err
 	}

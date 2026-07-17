@@ -72,6 +72,7 @@ button, input, select, textarea {
 .template-modal-panel.max-w-md { max-width: 448px; }
 .template-modal-panel.max-w-2xl { max-width: 672px; }
 .template-modal-panel.max-w-3xl { max-width: 768px; }
+.template-modal-panel.max-w-4xl { max-width: 896px; }
 
 .template-toolbar {
   display: flex;

@@ -74,7 +74,7 @@ func (h Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid credentials"})
 		return
 	}
-	_ = h.audit.Write(r.Context(), audit.Event{TenantID: principal.TenantID, ActorUserID: principal.UserID, ActorType: "tenant_user", Action: "login.success", ResourceType: "auth_session", IPAddress: clientIP(r), UserAgent: r.UserAgent(), RequestID: httpmw.RequestID(r.Context()), After: map[string]any{"email": principal.Email}})
+	_ = h.audit.Write(r.Context(), audit.Event{TenantID: principal.TenantID, ActorUserID: principal.UserID, ActorType: "tenant_user", Action: "login.success", ResourceType: "auth_session", IPAddress: clientIP(r), UserAgent: r.UserAgent(), RequestID: httpmw.RequestID(r.Context()), SessionID: principal.SessionID, After: map[string]any{"email": principal.Email}})
 	writeJSON(w, http.StatusOK, map[string]any{"access_token": tokens.AccessToken, "refresh_token": tokens.RefreshToken, "user": principal})
 }
 
@@ -340,7 +340,7 @@ func (h Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	q := `SELECT al.id::text, al.action, al.actor_type, COALESCE(al.actor_user_id::text,''), al.resource_type, COALESCE(al.resource_id::text,''), al.ip_address, al.created_at`
+	q := `SELECT al.id::text, al.action, al.actor_type, COALESCE(al.actor_user_id::text,''), al.resource_type, COALESCE(al.resource_id::text,''), COALESCE(al.ip_address,''), COALESCE(al.request_id,''), COALESCE(al.session_id,''), al.created_at`
 	args := []any{}
 	if p.IsPlatform {
 		q += `, COALESCE(t.name,'') AS tenant_name FROM audit_logs al LEFT JOIN tenants t ON t.id = al.tenant_id`
@@ -357,21 +357,21 @@ func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, action, actorType, actorUserID, resourceType, resourceID, ipAddress string
+		var id, action, actorType, actorUserID, resourceType, resourceID, ipAddress, requestID, sessionID string
 		var createdAt time.Time
 		if p.IsPlatform {
 			var tenantName string
-			if err := rows.Scan(&id, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &createdAt, &tenantName); err != nil {
+			if err := rows.Scan(&id, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &requestID, &sessionID, &createdAt, &tenantName); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "created_at": createdAt, "tenant_name": tenantName})
+			items = append(items, map[string]any{"id": id, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "request_id": requestID, "session_id": sessionID, "created_at": createdAt, "tenant_name": tenantName})
 		} else {
-			if err := rows.Scan(&id, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &createdAt); err != nil {
+			if err := rows.Scan(&id, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &requestID, &sessionID, &createdAt); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "created_at": createdAt})
+			items = append(items, map[string]any{"id": id, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "request_id": requestID, "session_id": sessionID, "created_at": createdAt})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -494,19 +494,34 @@ func (h Handler) RevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 func (h Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
 	tenantFilter := r.URL.Query().Get("tenant_id")
+	userScope := r.URL.Query().Get("scope")
 	var rows pgx.Rows
 	var err error
 	if p.IsPlatform {
-		q := `SELECT u.id::text, u.email, u.name, u.is_platform_admin, u.status, u.created_at, COALESCE((SELECT STRING_AGG(DISTINCT t.name, ', ') FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id WHERE tu.user_id = u.id), '') AS tenants FROM users u`
+		q := `SELECT u.id::text, u.email, u.name, u.is_platform_admin, u.status, u.created_at,
+			COALESCE((SELECT STRING_AGG(DISTINCT r.name, ', ') FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id), '') AS roles,
+			COALESCE((SELECT STRING_AGG(DISTINCT t.name, ', ') FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id WHERE tu.user_id = u.id), '') AS tenants
+			FROM users u`
 		args := []any{}
+		where := []string{}
+		if userScope == "platform" {
+			where = append(where, "u.is_platform_admin = true")
+		} else if userScope == "tenant" {
+			where = append(where, "u.is_platform_admin = false")
+		}
 		if tenantFilter != "" {
-			q += ` WHERE u.id IN (SELECT user_id FROM tenant_users WHERE tenant_id = $1)`
+			where = append(where, "u.id IN (SELECT user_id FROM tenant_users WHERE tenant_id = $"+itoa(len(args)+1)+")")
 			args = append(args, tenantFilter)
+		}
+		if len(where) > 0 {
+			q += ` WHERE ` + strings.Join(where, ` AND `)
 		}
 		q += ` ORDER BY u.created_at DESC LIMIT 100`
 		rows, err = h.db.Query(r.Context(), q, args...)
 	} else {
-		rows, err = h.db.Query(r.Context(), `SELECT u.id::text, u.email, u.name, u.is_platform_admin, u.status, u.created_at FROM users u JOIN tenant_users tu ON tu.user_id = u.id WHERE tu.tenant_id = $1 ORDER BY u.created_at DESC LIMIT 100`, p.TenantID)
+		rows, err = h.db.Query(r.Context(), `SELECT u.id::text, u.email, u.name, u.is_platform_admin, u.status, u.created_at,
+			COALESCE((SELECT STRING_AGG(DISTINCT r.name, ', ') FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND ur.tenant_id = tu.tenant_id), '') AS roles
+			FROM users u JOIN tenant_users tu ON tu.user_id = u.id WHERE tu.tenant_id = $1 ORDER BY u.created_at DESC LIMIT 100`, p.TenantID)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -516,21 +531,22 @@ func (h Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	items := []map[string]any{}
 	for rows.Next() {
 		var id, email, name, status string
+		var roles string
 		var isPlatform bool
 		var createdAt time.Time
 		if p.IsPlatform {
 			var tenants string
-			if err := rows.Scan(&id, &email, &name, &isPlatform, &status, &createdAt, &tenants); err != nil {
+			if err := rows.Scan(&id, &email, &name, &isPlatform, &status, &createdAt, &roles, &tenants); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "email": email, "name": name, "is_platform_admin": isPlatform, "status": status, "created_at": createdAt, "tenants": tenants})
+			items = append(items, map[string]any{"id": id, "email": email, "name": name, "is_platform_admin": isPlatform, "status": status, "created_at": createdAt, "roles": roles, "tenants": tenants})
 		} else {
-			if err := rows.Scan(&id, &email, &name, &isPlatform, &status, &createdAt); err != nil {
+			if err := rows.Scan(&id, &email, &name, &isPlatform, &status, &createdAt, &roles); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "email": email, "name": name, "is_platform_admin": isPlatform, "status": status, "created_at": createdAt})
+			items = append(items, map[string]any{"id": id, "email": email, "name": name, "is_platform_admin": isPlatform, "status": status, "created_at": createdAt, "roles": roles})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -655,10 +671,11 @@ func clientIP(r *http.Request) string {
 
 func (h Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Email    string `json:"email"`
-		Name     string `json:"name"`
-		Password string `json:"password"`
-		TenantID string `json:"tenant_id"`
+		Email           string `json:"email"`
+		Name            string `json:"name"`
+		Password        string `json:"password"`
+		TenantID        string `json:"tenant_id"`
+		IsPlatformAdmin bool   `json:"is_platform_admin"`
 	}
 	if decode(w, r, &req) != nil {
 		return
@@ -676,16 +693,25 @@ func (h Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	tenantID := req.TenantID
 	if !p.IsPlatform {
 		tenantID = p.TenantID
+		req.IsPlatformAdmin = false
+	}
+	if req.IsPlatformAdmin && !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "cannot create platform admin"})
+		return
+	}
+	if !req.IsPlatformAdmin && tenantID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant_id is required for tenant users"})
+		return
 	}
 	var userID string
-	if err := h.db.QueryRow(r.Context(), `INSERT INTO users (email, name, password_hash, status) VALUES ($1,$2,$3,'active') RETURNING id::text`, req.Email, req.Name, hash).Scan(&userID); err != nil {
+	if err := h.db.QueryRow(r.Context(), `INSERT INTO users (email, name, password_hash, is_platform_admin, status) VALUES ($1,$2,$3,$4,'active') RETURNING id::text`, req.Email, req.Name, hash, req.IsPlatformAdmin).Scan(&userID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "create failed", "detail": err.Error()})
 		return
 	}
 	if tenantID != "" {
 		h.db.Exec(r.Context(), `INSERT INTO tenant_users (tenant_id, user_id, status) VALUES ($1,$2,'active') ON CONFLICT DO NOTHING`, tenantID, userID)
 	}
-	_ = h.audit.Write(r.Context(), audit.Event{TenantID: tenantID, ActorUserID: p.UserID, ActorType: "tenant_user", Action: "user.create", ResourceType: "user", ResourceID: userID, After: map[string]any{"email": req.Email, "name": req.Name}})
+	_ = h.audit.Write(r.Context(), audit.Event{TenantID: tenantID, ActorUserID: p.UserID, ActorType: "tenant_user", Action: "user.create", ResourceType: "user", ResourceID: userID, After: map[string]any{"email": req.Email, "name": req.Name, "is_platform_admin": req.IsPlatformAdmin}})
 	writeJSON(w, http.StatusCreated, map[string]any{"id": userID, "message": "user created"})
 }
 
