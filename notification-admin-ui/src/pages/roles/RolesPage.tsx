@@ -31,7 +31,6 @@ export function RolesPage() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
   const [key, setKey] = useState('');
-  const [scope, setScope] = useState<'tenant'|'platform'>('tenant');
   const [tenantId, setTenantId] = useState('');
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [createPerms, setCreatePerms] = useState<Set<string>>(new Set());
@@ -61,7 +60,7 @@ export function RolesPage() {
       const created = await apiRequest<{id:string}>('/admin/api/v1/roles', { method: 'POST', body: JSON.stringify({ name, key, scope: createScope, ...(createTenantId?{tenant_id:createTenantId}:{}) }) });
       if (createPerms.size) await apiRequest(`/admin/api/v1/roles/${created.id}/permissions`, { method: 'PUT', body: JSON.stringify({ permission_ids: Array.from(createPerms) }) });
       setName(''); setKey('');
-      setScope('tenant'); setTenantId(''); setCreatePerms(new Set());
+      setTenantId(''); setCreatePerms(new Set());
       setShowForm(false); setMessage('Role created');
       load();
     } catch (err) { setError(err instanceof Error ? err.message : 'Create failed'); }
