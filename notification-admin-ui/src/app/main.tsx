@@ -22,6 +22,7 @@ import { ChannelsPage } from '../pages/channels/ChannelsPage';
 import { ProvidersPage } from '../pages/providers/ProvidersPage';
 import { GroupsPage } from '../pages/groups/GroupsPage';
 import { SettingsPage } from '../pages/settings/SettingsPage';
+import { ToastProvider } from '../components/Toast';
 import './styles.css';
 
 function PrivateRoute() {
@@ -33,31 +34,33 @@ function PrivateRoute() {
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<PrivateRoute />}>
-            <Route path="/" element={<DashboardPage />} />
-            <Route path="/tenants" element={<TenantsPage />} />
-            <Route path="/tenants/:id" element={<TenantDetailPage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/notifications/send" element={<SendNotificationPage />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/contacts" element={<ContactsPage />} />
-            <Route path="/templates" element={<TemplatesPage />} />
-            <Route path="/campaigns" element={<CampaignsPage />} />
-            <Route path="/roles" element={<RolesPage />} />
-            <Route path="/permissions" element={<PermissionsPage />} />
-            <Route path="/api-keys" element={<ApiKeysPage />} />
-            <Route path="/audit-logs" element={<AuditLogsPage />} />
-            <Route path="/groups" element={<GroupsPage />} />
-            <Route path="/features" element={<FeaturesPage />} />
-            <Route path="/channels" element={<ChannelsPage />} />
-            <Route path="/providers" element={<ProvidersPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Route>
-        </Routes>
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route element={<PrivateRoute />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/tenants" element={<TenantsPage />} />
+              <Route path="/tenants/:id" element={<TenantDetailPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/notifications/send" element={<SendNotificationPage />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/contacts" element={<ContactsPage />} />
+              <Route path="/templates" element={<TemplatesPage />} />
+              <Route path="/campaigns" element={<CampaignsPage />} />
+              <Route path="/roles" element={<RolesPage />} />
+              <Route path="/permissions" element={<PermissionsPage />} />
+              <Route path="/api-keys" element={<ApiKeysPage />} />
+              <Route path="/audit-logs" element={<AuditLogsPage />} />
+              <Route path="/groups" element={<GroupsPage />} />
+              <Route path="/features" element={<FeaturesPage />} />
+              <Route path="/channels" element={<ChannelsPage />} />
+              <Route path="/providers" element={<ProvidersPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </AuthProvider>
+      </ToastProvider>
     </BrowserRouter>
   );
 }

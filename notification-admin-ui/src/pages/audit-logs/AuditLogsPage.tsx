@@ -1,26 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
+import { Button, RowActionButton } from '../../components/Button';
+import { TenantFilter } from '../../components/TenantFilter';
 import { useAuth } from '../../auth/AuthContext';
-import { Eye } from 'lucide-react';
+import { Eye, Search, X } from 'lucide-react';
+import { useToast } from '../../components/Toast';
 
 type AuditLog = { id: string; action: string; actor_type: string; actor_user_id: string; resource_type: string; resource_id: string; ip_address: string; request_id?: string; session_id?: string; created_at: string; tenant_name?: string };
+type Tenant = { id: string; name: string; slug?: string; status: string };
 
 export function AuditLogsPage() {
   const { user } = useAuth();
+  const toast = useToast();
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<AuditLog[]>([]);
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AuditLog | null>(null);
+  const [tenantFilter, setTenantFilter] = useState('');
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     setLoading(true);
-    list<AuditLog>('/admin/api/v1/audit-logs').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false));
-  }, []);
+    list<AuditLog>('/admin/api/v1/audit-logs' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : '')).then((res) => setItems(res.data)).catch((err) => toast.error('Unable to load audit logs', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
+  }, [tenantFilter, toast]);
+  useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((res)=>setTenants(res.data)).catch(()=>{}); }, [isPlatform]);
 
-  const grouped = items.reduce<Record<string, AuditLog[]>>((acc, item) => {
+  const visibleItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return items;
+    return items.filter((item) => [item.action, item.actor_type, item.actor_user_id, item.resource_type, item.resource_id, item.ip_address, item.request_id || '', item.session_id || '', item.tenant_name || ''].some((value) => value.toLowerCase().includes(query)));
+  }, [items, search]);
+  const grouped = visibleItems.reduce<Record<string, AuditLog[]>>((acc, item) => {
     const key = item.session_id || 'No session';
     if (!acc[key]) acc[key] = [];
     acc[key].push(item);
@@ -30,11 +43,21 @@ export function AuditLogsPage() {
 
   return (<>
     <Panel title="Audit Logs">
-      {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      <div className="template-toolbar">
+        <div className="template-search-control">
+          <label htmlFor="audit-search">Search audit logs</label>
+          <div className="template-control-input">
+            <Search aria-hidden="true" size={16} />
+            <input id="audit-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Action, actor, resource, session, tenant, or IP" />
+          </div>
+        </div>
+        {isPlatform && <TenantFilter className="template-filter-control template-tenant-control" value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />}
+        {(search || tenantFilter) && <Button size="sm" icon={X} onClick={() => { setSearch(''); setTenantFilter(''); }} className="template-clear-filters">Clear filters</Button>}
+      </div>
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
-      ) : items.length === 0 ? (
+      ) : visibleItems.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No audit logs found</div>
       ) : (
         <div className="space-y-6">
@@ -61,7 +84,7 @@ export function AuditLogsPage() {
                       <td>{item.ip_address || '-'}</td>
                       <td>{item.created_at}</td>
                       {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
-                      <td><button onClick={() => setSelected(item)} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button></td>
+                      <td><RowActionButton onClick={() => setSelected(item)} icon={Eye}>View</RowActionButton></td>
                     </tr>
                   ))}
                 </tbody>

@@ -1,12 +1,14 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
+import { TenantFilter } from '../../components/TenantFilter';
 import { useAuth } from '../../auth/AuthContext';
+import { useToast } from '../../components/Toast';
 import {
   AlertTriangle,
   Braces,
-  CheckCircle2,
   Eye,
   FileText,
   Mail,
@@ -31,7 +33,7 @@ type Template = {
   created_at: string;
 };
 
-type Tenant = { id: string; name: string; status: string };
+type Tenant = { id: string; name: string; slug?: string; status: string };
 type ModalState =
   | { mode: 'create' }
   | { mode: 'view'; template: Template }
@@ -46,8 +48,16 @@ type FormValues = {
   subject: string;
   body: string;
 };
+type PreviewMode = 'text' | 'markdown' | 'html';
 
 const emptyForm: FormValues = { tenantId: '', templateKey: '', channel: 'email', subject: '', body: '' };
+
+function renderMarkdownLite(value: string) {
+  return value
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
+}
 
 function Modal({ title, description, children, onClose, width = 'max-w-3xl' }: { title: string; description?: string; children: ReactNode; onClose: () => void; width?: string }) {
   useEffect(() => {
@@ -92,11 +102,11 @@ function ChannelBadge({ channel }: { channel: string }) {
 
 export function TemplatesPage() {
   const { user, can } = useAuth();
+  const toast = useToast();
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<Template[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
@@ -104,6 +114,7 @@ export function TemplatesPage() {
   const [channelFilter, setChannelFilter] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
   const [form, setForm] = useState<FormValues>(emptyForm);
+  const [formPreviewMode, setFormPreviewMode] = useState<PreviewMode>('text');
 
   function load() {
     setLoading(true);
@@ -111,7 +122,7 @@ export function TemplatesPage() {
     const endpoint = '/admin/api/v1/templates' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : '');
     list<Template>(endpoint)
       .then((res) => setItems(res.data))
-      .catch((err) => setError(err.message))
+      .catch((err) => toast.error('Unable to load templates', err instanceof Error ? err.message : 'Load failed'))
       .finally(() => setLoading(false));
   }
 
@@ -152,15 +163,17 @@ export function TemplatesPage() {
       const payload = { tenant_id: form.tenantId, template_key: form.templateKey.trim(), channel: form.channel, subject: form.subject.trim(), body: form.body };
       if (modal?.mode === 'edit') {
         await apiRequest(`/admin/api/v1/templates/${modal.template.id}`, { method: 'PUT', body: JSON.stringify(payload) });
-        setMessage('Template updated successfully.');
+        toast.success('Template updated', form.templateKey);
       } else {
         await apiRequest('/admin/api/v1/templates', { method: 'POST', body: JSON.stringify(payload) });
-        setMessage('Template created successfully.');
+        toast.success('Template created', form.templateKey);
       }
       setModal(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save template.');
+      const msg = err instanceof Error ? err.message : 'Unable to save template.';
+      setError(msg);
+      toast.error('Unable to save template', msg);
     } finally {
       setSaving(false);
     }
@@ -172,10 +185,12 @@ export function TemplatesPage() {
     try {
       await apiRequest(`/admin/api/v1/templates/${template.id}`, { method: 'DELETE' });
       setModal(null);
-      setMessage(`Template “${template.template_key}” was deleted.`);
+      toast.success('Template deleted', template.template_key);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to delete template.');
+      const msg = err instanceof Error ? err.message : 'Unable to delete template.';
+      setError(msg);
+      toast.error('Unable to delete template', msg);
     } finally {
       setSaving(false);
     }
@@ -186,17 +201,12 @@ export function TemplatesPage() {
       <Panel
         title="Templates"
         actions={can('templates.create') ? (
-          <button onClick={openCreate} className="focus-ring inline-flex items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
-            <Plus size={16} /> New template
-          </button>
+          <Button onClick={openCreate} variant="primary" icon={Plus}>New template</Button>
         ) : undefined}
       >
         <div className="mb-5 flex flex-col gap-1">
           <p className="text-sm text-slate-500">Manage reusable content for every notification channel and tenant.</p>
         </div>
-
-        {error && !modal && <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><AlertTriangle className="mt-0.5 shrink-0" size={16} />{error}</div>}
-        {message && <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"><CheckCircle2 size={16} />{message}</div>}
 
         <div className="template-toolbar">
           <div className="template-search-control">
@@ -211,13 +221,10 @@ export function TemplatesPage() {
             <SearchSelect value={channelFilter} onChange={setChannelFilter} options={[{value:'',label:'All channels'},{value:'email',label:'Email'},{value:'sms',label:'SMS'},{value:'fcm',label:'FCM'}]}/>
           </div>
           {isPlatform && (
-            <div className="template-filter-control template-tenant-control">
-              <label htmlFor="template-tenant">Tenant</label>
-              <SearchSelect value={tenantFilter} onChange={setTenantFilter} options={[{value:'',label:'All tenants'},...tenants.map((tenant)=>({value:tenant.id,label:tenant.name}))]}/>
-            </div>
+            <TenantFilter className="template-filter-control template-tenant-control" value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />
           )}
           {(search || channelFilter || tenantFilter) && (
-            <button className="template-clear-filters" onClick={() => { setSearch(''); setChannelFilter(''); setTenantFilter(''); }}>Clear filters</button>
+            <Button size="sm" icon={X} onClick={() => { setSearch(''); setChannelFilter(''); setTenantFilter(''); }} className="template-clear-filters">Clear filters</Button>
           )}
         </div>
 
@@ -240,9 +247,9 @@ export function TemplatesPage() {
                     <td className="max-w-xs truncate px-4 py-3.5 text-slate-600">{item.subject || <span className="text-slate-400">No subject</span>}</td>
                     <td className="px-4 py-3.5"><span className="inline-flex items-center gap-1.5 text-xs font-medium capitalize text-emerald-700"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{item.status}</span></td>
                     <td className="px-4 py-3.5"><div className="flex justify-end gap-1">
-                      <button onClick={() => setModal({ mode: 'view', template: item })} className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100" title="View template"><Eye size={14} /> View</button>
-                      {can('templates.update') && <button onClick={() => openEdit(item)} className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50" title="Edit template"><Pencil size={14} /> Edit</button>}
-                      {can('templates.delete') && <button onClick={() => setModal({ mode: 'delete', template: item })} className="focus-ring rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete template"><Trash2 size={15} /></button>}
+                      <RowActionButton onClick={() => setModal({ mode: 'view', template: item })} icon={Eye} tone="neutral" title="View template">View</RowActionButton>
+                      {can('templates.update') && <RowActionButton onClick={() => openEdit(item)} icon={Pencil} title="Edit template">Edit</RowActionButton>}
+                      {can('templates.delete') && <RowActionButton onClick={() => setModal({ mode: 'delete', template: item })} icon={Trash2} tone="danger" title="Delete template">Delete</RowActionButton>}
                     </div></td>
                   </tr>
                 ))}
@@ -265,8 +272,9 @@ export function TemplatesPage() {
               </div>
               <FormField label="Subject" hint={form.channel === 'email' ? 'Email subject line. Variables are supported.' : 'Optional for this channel.'}><input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Your order {{order_id}} is confirmed" className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm" /></FormField>
               <FormField label="Message body" required hint="Use double braces for variables, for example {{customer_name}}."><textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={9} placeholder="Hello {{customer_name}},\n\nYour notification content goes here." className="focus-ring w-full resize-y rounded-md border border-slate-300 px-3 py-2.5 font-mono text-sm leading-6" required /></FormField>
+              <TemplatePreviewPanel subject={form.subject} body={form.body} mode={formPreviewMode} onModeChange={setFormPreviewMode} />
             </div>
-            <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><button type="button" onClick={() => setModal(null)} className="focus-ring rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button><button disabled={saving} className="focus-ring rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60">{saving ? 'Saving…' : modal.mode === 'create' ? 'Create template' : 'Save changes'}</button></footer>
+            <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><Button type="button" onClick={() => setModal(null)} icon={X}>Cancel</Button><Button disabled={saving} variant="primary" icon={modal.mode === 'create' ? Plus : Pencil}>{saving ? 'Saving…' : modal.mode === 'create' ? 'Create template' : 'Save changes'}</Button></footer>
           </form>
         </Modal>
       )}
@@ -277,7 +285,7 @@ export function TemplatesPage() {
         <Modal title="Delete template" description="This action cannot be undone." onClose={() => setModal(null)} width="max-w-md">
           <div className="px-6 py-5"><div className="flex gap-4"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600"><AlertTriangle size={20} /></span><p className="text-sm leading-6 text-slate-600">Delete <strong className="font-semibold text-slate-900">{modal.template.template_key}</strong>? Applications using this key may no longer be able to send notifications.</p></div></div>
           {error && <div className="mx-6 mb-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><button onClick={() => setModal(null)} className="focus-ring rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button><button onClick={() => removeTemplate(modal.template)} disabled={saving} className="focus-ring rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60">{saving ? 'Deleting…' : 'Delete template'}</button></footer>
+          <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><Button onClick={() => setModal(null)} icon={X}>Cancel</Button><Button onClick={() => removeTemplate(modal.template)} disabled={saving} variant="danger" icon={Trash2}>{saving ? 'Deleting…' : 'Delete template'}</Button></footer>
         </Modal>
       )}
     </>
@@ -288,7 +296,43 @@ function FormField({ label, hint, required, children }: { label: string; hint?: 
   return <label className="block"><span className="mb-1.5 block text-sm font-medium text-slate-700">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>{children}{hint && <span className="mt-1.5 block text-xs text-slate-500">{hint}</span>}</label>;
 }
 
+function PreviewModeTabs({ value, onChange }: { value: PreviewMode; onChange: (value: PreviewMode) => void }) {
+  return (
+    <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
+      {(['text', 'markdown', 'html'] as PreviewMode[]).map((mode) => (
+        <button key={mode} type="button" onClick={() => onChange(mode)} className={`focus-ring rounded px-3 py-1.5 text-xs font-medium capitalize ${value === mode ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{mode}</button>
+      ))}
+    </div>
+  );
+}
+
+function TemplatePreviewPanel({ subject, body, mode, onModeChange }: { subject?: string; body?: string; mode: PreviewMode; onModeChange: (mode: PreviewMode) => void }) {
+  const content = body || '';
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">Preview</h3>
+          <p className="mt-0.5 text-xs text-slate-500">Switch between text, markdown, and HTML output.</p>
+        </div>
+        <PreviewModeTabs value={mode} onChange={onModeChange} />
+      </div>
+      <div className="space-y-3 p-4">
+        {subject && <div className="rounded-md bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800">{subject}</div>}
+        {mode === 'html' ? (
+          <iframe title="Template HTML preview" className="h-64 w-full rounded-md border border-slate-200 bg-white" srcDoc={content || '<p></p>'} />
+        ) : mode === 'markdown' ? (
+          <div className="min-h-32 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">{renderMarkdownLite(content) || 'No body content'}</div>
+        ) : (
+          <pre className="min-h-32 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-950 px-3 py-2 text-sm leading-6 text-slate-100">{content || 'No body content'}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TemplatePreview({ template, onClose, onEdit }: { template: Template; onClose: () => void; onEdit?: () => void }) {
+  const [mode, setMode] = useState<PreviewMode>('text');
   return (
     <Modal title={template.template_key} description="Template details and rendered content preview." onClose={onClose}>
       <div className="max-h-[calc(92vh-160px)] overflow-y-auto px-6 py-5">
@@ -297,12 +341,9 @@ function TemplatePreview({ template, onClose, onEdit }: { template: Template; on
           <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Tenant</dt><dd className="mt-2 text-sm font-medium text-slate-700">{template.tenant_name || 'Current tenant'}</dd></div>
           <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</dt><dd className="mt-2 text-sm font-medium capitalize text-emerald-700">{template.status}</dd></div>
         </dl>
-        <div className="overflow-hidden rounded-lg border border-slate-200">
-          {template.subject && <div className="border-b border-slate-200 bg-white px-5 py-4"><div className="text-xs font-medium uppercase tracking-wide text-slate-400">Subject</div><div className="mt-1.5 font-medium text-slate-800">{template.subject}</div></div>}
-          <div className="bg-white px-5 py-5"><div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">Message body</div><pre className="whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">{template.body || 'No content'}</pre></div>
-        </div>
+        <TemplatePreviewPanel subject={template.subject} body={template.body} mode={mode} onModeChange={setMode} />
       </div>
-      <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><button onClick={onClose} className="focus-ring rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Close</button>{onEdit && <button onClick={onEdit} className="focus-ring inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"><Pencil size={15} />Edit template</button>}</footer>
+      <footer className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4"><Button onClick={onClose} icon={X}>Close</Button>{onEdit && <Button onClick={onEdit} variant="primary" icon={Pencil}>Edit template</Button>}</footer>
     </Modal>
   );
 }

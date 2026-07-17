@@ -1,14 +1,17 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Button } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
 import { useAuth } from '../../auth/AuthContext';
 import { Save } from 'lucide-react';
+import { useToast } from '../../components/Toast';
 
 type TenantOption = { id: string; name: string; slug: string };
 
 export function SettingsPage() {
   const { user, can } = useAuth();
+  const toast = useToast();
   const isPlatform = user?.is_platform_admin ?? false;
   const myTenantId = user?.tenant_id ?? '';
   const [tenants, setTenants] = useState<TenantOption[]>([]);
@@ -21,7 +24,6 @@ export function SettingsPage() {
   const [metadata, setMetadata] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -44,13 +46,13 @@ export function SettingsPage() {
       setDefaultSms(d.default_sms || '');
       setBrandingLogo(d.branding_logo || '');
       setMetadata(d.metadata ? JSON.stringify(d.metadata, null, 2) : '');
-    }).catch((err) => setError(err.message)).finally(() => setLoading(false));
+    }).catch((err) => toast.error('Unable to load settings', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
   }, [selectedTenantId]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!selectedTenantId) return;
-    setSaving(true); setError(''); setMessage('');
+    setSaving(true); setError('');
     const body: Record<string, unknown> = {
       timezone: timezone || null,
       country: country || null,
@@ -64,17 +66,16 @@ export function SettingsPage() {
     }
     try {
       await apiRequest(`/admin/api/v1/tenants/${selectedTenantId}/settings`, { method: 'PUT', body: JSON.stringify(body) });
-      setMessage('Settings saved');
-    } catch (err) { setError(err instanceof Error ? err.message : 'Save failed'); }
+      toast.success('Settings saved');
+    } catch (err) { toast.error('Unable to save settings', err instanceof Error ? err.message : 'Save failed'); }
     finally { setSaving(false); }
   }
 
   if (!selectedTenantId) return <Panel title="Settings"><div className="py-8 text-center text-slate-400">Select a tenant to manage settings</div></Panel>;
 
   return (
-    <Panel title="Settings" actions={can('settings.update') ? <button onClick={submit} disabled={saving} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"><Save size={14} />{saving ? 'Saving...' : 'Save'}</button> : undefined}>
+    <Panel title="Settings" actions={can('settings.update') ? <Button onClick={submit} disabled={saving} variant="primary" icon={Save}>{saving ? 'Saving...' : 'Save'}</Button> : undefined}>
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
 
       <div className="mb-6 border-b border-slate-200 pb-5">
         <p className="text-sm leading-6 text-slate-600">Configure tenant-wide localization, sender identities, and customer-facing branding. These defaults are applied when a notification does not provide an explicit override.</p>

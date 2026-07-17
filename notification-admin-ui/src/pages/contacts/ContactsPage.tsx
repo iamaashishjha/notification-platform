@@ -2,9 +2,12 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
+import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
+import { TenantFilter } from '../../components/TenantFilter';
 import { useAuth } from '../../auth/AuthContext';
 import { AlertTriangle, Eye, Mail, Pencil, Phone, Plus, Search, Trash2, UserRound } from 'lucide-react';
+import { useToast } from '../../components/Toast';
 
 type Contact = { id: string; tenant_id: string; name: string; email: string; phone: string; status: string; created_at: string; external_ref?: string; tenant_name?: string };
 type Tenant = { id: string; name: string; status: string };
@@ -14,11 +17,11 @@ const emptyForm: FormData = { tenantId: '', name: '', email: '', phone: '', exte
 
 export function ContactsPage() {
   const { user, can } = useAuth();
+  const toast = useToast();
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<Contact[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [error, setError] = useState('');
-  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
@@ -29,7 +32,7 @@ export function ContactsPage() {
   function load() {
     setLoading(true); setError('');
     list<Contact>('/admin/api/v1/contacts' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : ''))
-      .then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false));
+      .then((res) => setItems(res.data)).catch((err) => toast.error('Unable to load contacts', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
   }
   useEffect(load, [tenantFilter]);
   useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((res) => setTenants(res.data)).catch(() => undefined); }, [isPlatform]);
@@ -44,31 +47,29 @@ export function ContactsPage() {
     setSaving(true); setError('');
     try {
       const payload = { tenant_id: form.tenantId, name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(), external_ref: form.externalRef.trim() || undefined };
-      if (mode?.type === 'edit') { await apiRequest(`/admin/api/v1/contacts/${mode.contact.id}`, { method: 'PUT', body: JSON.stringify(payload) }); setMessage('Contact updated successfully.'); }
-      else { await apiRequest('/admin/api/v1/contacts', { method: 'POST', body: JSON.stringify(payload) }); setMessage('Contact created successfully.'); }
+      if (mode?.type === 'edit') { await apiRequest(`/admin/api/v1/contacts/${mode.contact.id}`, { method: 'PUT', body: JSON.stringify(payload) }); toast.success('Contact updated'); }
+      else { await apiRequest('/admin/api/v1/contacts', { method: 'POST', body: JSON.stringify(payload) }); toast.success('Contact created'); }
       setMode(null); load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Unable to save contact.'); }
+    } catch (err) { const msg = err instanceof Error ? err.message : 'Unable to save contact.'; setError(msg); toast.error('Unable to save contact', msg); }
     finally { setSaving(false); }
   }
 
   async function remove(contact: Contact) {
     setSaving(true); setError('');
-    try { await apiRequest(`/admin/api/v1/contacts/${contact.id}`, { method: 'DELETE' }); setMode(null); setMessage(`Contact “${contact.name}” deleted.`); load(); }
-    catch (err) { setError(err instanceof Error ? err.message : 'Unable to delete contact.'); }
+    try { await apiRequest(`/admin/api/v1/contacts/${contact.id}`, { method: 'DELETE' }); setMode(null); toast.success('Contact deleted', contact.name); load(); }
+    catch (err) { const msg = err instanceof Error ? err.message : 'Unable to delete contact.'; setError(msg); toast.error('Unable to delete contact', msg); }
     finally { setSaving(false); }
   }
 
   return <>
-    <Panel title="Contacts" actions={can('contacts.create') ? <button onClick={create} className="focus-ring inline-flex items-center gap-2 rounded-md bg-blue-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"><Plus size={16} />New contact</button> : undefined}>
+    <Panel title="Contacts" actions={can('contacts.create') ? <Button onClick={create} variant="primary" icon={Plus}>New contact</Button> : undefined}>
       <p className="mb-5 text-sm text-slate-500">Manage recipient identities and delivery addresses.</p>
-      {error && !mode && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {message && <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</div>}
       <div className="mb-5 flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
         <label className="relative flex-1"><Search className="absolute left-3 top-2.5 text-slate-400" size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, email, phone, or reference" className="focus-ring w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm" /></label>
-        {isPlatform && <SearchSelect className="w-64" value={tenantFilter} onChange={setTenantFilter} options={[{value:'',label:'All tenants'},...tenants.map((tenant)=>({value:tenant.id,label:tenant.name}))]}/>}
+        {isPlatform && <TenantFilter value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />}
       </div>
-      <div className="overflow-hidden rounded-lg border border-slate-200"><table className="w-full text-left text-sm"><thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Phone</th>{isPlatform && <th className="px-4 py-3">Tenant</th>}<th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
-        <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={isPlatform ? 6 : 5} className="py-14 text-center text-slate-400">Loading contacts…</td></tr> : visible.length === 0 ? <tr><td colSpan={isPlatform ? 6 : 5} className="py-14 text-center text-slate-400">No contacts found</td></tr> : visible.map((item) => <tr key={item.id} className="hover:bg-slate-50/70"><td className="px-4 py-3.5"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 font-semibold text-blue-700">{item.name.charAt(0).toUpperCase()}</span><div><div className="font-semibold text-slate-900">{item.name}</div>{item.external_ref && <div className="text-xs text-slate-400">Ref: {item.external_ref}</div>}</div></div></td><td className="px-4 py-3.5 text-slate-600">{item.email || '—'}</td><td className="px-4 py-3.5 text-slate-600">{item.phone || '—'}</td>{isPlatform && <td className="px-4 py-3.5 text-slate-600">{item.tenant_name || '—'}</td>}<td className="px-4 py-3.5"><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium capitalize text-emerald-700">{item.status}</span></td><td className="px-4 py-3.5"><div className="flex justify-end gap-1"><button onClick={() => setMode({ type: 'view', contact: item })} className="focus-ring rounded-md p-2 text-slate-500 hover:bg-slate-100" title="View"><Eye size={15} /></button>{can('contacts.update') && <button onClick={() => edit(item)} className="focus-ring rounded-md p-2 text-blue-600 hover:bg-blue-50" title="Edit"><Pencil size={15} /></button>}{can('contacts.delete') && <button onClick={() => setMode({ type: 'delete', contact: item })} className="focus-ring rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete"><Trash2 size={15} /></button>}</div></td></tr>)}</tbody>
+      <div className="overflow-hidden rounded-lg border border-slate-200"><table data-no-datatable="true" className="w-full text-left text-sm"><thead className="border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Contact</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Phone</th>{isPlatform && <th className="px-4 py-3">Tenant</th>}<th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
+        <tbody className="divide-y divide-slate-100">{loading ? <tr><td colSpan={isPlatform ? 6 : 5} className="py-14 text-center text-slate-400">Loading contacts…</td></tr> : visible.length === 0 ? <tr><td colSpan={isPlatform ? 6 : 5} className="py-14 text-center text-slate-400">No contacts found</td></tr> : visible.map((item) => <tr key={item.id} className="hover:bg-slate-50/70"><td className="px-4 py-3.5"><div className="flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 font-semibold text-blue-700">{item.name.charAt(0).toUpperCase()}</span><div><div className="font-semibold text-slate-900">{item.name}</div>{item.external_ref && <div className="text-xs text-slate-400">Ref: {item.external_ref}</div>}</div></div></td><td className="px-4 py-3.5 text-slate-600">{item.email || '—'}</td><td className="px-4 py-3.5 text-slate-600">{item.phone || '—'}</td>{isPlatform && <td className="px-4 py-3.5 text-slate-600">{item.tenant_name || '—'}</td>}<td className="px-4 py-3.5"><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium capitalize text-emerald-700">{item.status}</span></td><td className="px-4 py-3.5"><div className="flex justify-end gap-1"><RowActionButton onClick={() => setMode({ type: 'view', contact: item })} icon={Eye} tone="neutral">View</RowActionButton>{can('contacts.update') && <RowActionButton onClick={() => edit(item)} icon={Pencil}>Edit</RowActionButton>}{can('contacts.delete') && <RowActionButton onClick={() => setMode({ type: 'delete', contact: item })} icon={Trash2} tone="danger">Delete</RowActionButton>}</div></td></tr>)}</tbody>
       </table></div>
     </Panel>
 

@@ -2,17 +2,33 @@ import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
+import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
+import { TenantFilter } from '../../components/TenantFilter';
 import { StatusBadge } from '../../components/StatusBadge';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { Plus, Power, Pencil, Eye, Trash2 } from 'lucide-react';
+import { CheckCircle2, Eye, Pencil, Plus, Trash2, X, XCircle } from 'lucide-react';
+import { useToast } from '../../components/Toast';
 
 type User = { id: string; email: string; name: string; is_platform_admin: boolean; status: string; created_at: string; roles?: string; tenants?: string };
 type Role = { id: string; tenant_id?: string; name: string; key: string; scope: string };
 type Tenant = { id: string; name: string; slug: string; status: string };
 
+function StatusToggle({ value, label, onToggle }: { value: boolean; label: string; onToggle: () => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onToggle} className={`focus-ring inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium ${value ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+      {value ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+      <span>{value ? 'Enabled' : 'Disabled'}</span>
+      <span className={`relative h-4 w-7 rounded-full transition ${value ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${value ? 'left-[14px]' : 'left-0.5'}`} /></span>
+    </button>
+  );
+}
+
 export function UsersPage() {
   const { user, can } = useAuth();
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
+  const toast = useToast();
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -27,7 +43,6 @@ export function UsersPage() {
   const [createTenantId, setCreateTenantId] = useState('');
   const [createRoleId, setCreateRoleId] = useState('');
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editEmail, setEditEmail] = useState('');
@@ -49,14 +64,14 @@ export function UsersPage() {
     if (isPlatform) {
       requests.push(list<Tenant>('/admin/api/v1/tenants').then((res) => setTenants(res.data.filter((tenant) => tenant.status === 'active'))));
     }
-    Promise.all(requests).catch((err) => setError(err.message)).finally(() => setLoading(false));
+    Promise.all(requests).catch((err) => toast.error('Unable to load users', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, [tenantFilter, userListScope, isPlatform]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setSaving(true); setError(''); setMessage('');
+    setSaving(true); setError('');
     try {
       const isPlatformUser = isPlatform && createScope === 'platform';
       const tenantId = isPlatform ? createTenantId : user?.tenant_id || '';
@@ -77,22 +92,21 @@ export function UsersPage() {
         });
       }
       setEmail(''); setName(''); setPassword(''); setCreateScope('tenant'); setCreateTenantId(''); setCreateRoleId('');
-      setShowForm(false); setMessage('User created');
+      setShowForm(false); toast.success('User created', email);
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Create failed'); }
+    } catch (err) { toast.error('Unable to create user', err instanceof Error ? err.message : 'Create failed'); }
     finally { setSaving(false); }
   }
 
   async function toggleUserStatus(u: User) {
     const newStatus = u.status === 'active' ? 'disabled' : 'active';
-    try { await apiRequest(`/admin/api/v1/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ status: newStatus }) }); load(); }
-    catch (err: any) { setError(err.message); }
+    try { await apiRequest(`/admin/api/v1/users/${u.id}`, { method: 'PUT', body: JSON.stringify({ status: newStatus }) }); toast.success(`User ${newStatus}`, u.email); load(); }
+    catch (err: any) { toast.error('Unable to update user status', err.message); }
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this user?')) return;
-    try { await apiRequest(`/admin/api/v1/users/${id}`, { method: 'DELETE' }); load(); }
-    catch (err: any) { setError(err.message); }
+    try { await apiRequest(`/admin/api/v1/users/${id}`, { method: 'DELETE' }); toast.success('User deleted'); load(); }
+    catch (err: any) { toast.error('Unable to delete user', err.message); }
   }
 
   function startEdit(item: User) {
@@ -111,8 +125,8 @@ export function UsersPage() {
         const role = roles.find((item) => item.id === editRoleId);
         await apiRequest(`/admin/api/v1/users/${id}/roles`, { method: 'POST', body: JSON.stringify({ role_id: editRoleId, ...(role?.scope === 'tenant' && role.tenant_id ? { tenant_id: role.tenant_id } : {}) }) });
       }
-      setEditingId(null); setMessage('User updated'); load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Update failed'); }
+      setEditingId(null); toast.success('User updated', editEmail); load();
+    } catch (err) { toast.error('Unable to update user', err instanceof Error ? err.message : 'Update failed'); }
     finally { setSaving(false); }
   }
 
@@ -132,20 +146,14 @@ export function UsersPage() {
   const createDisabled = saving || createTenantRequired && !createTenantId || createRoleRequired && !createRoleId;
   const visibleItems = isPlatform ? items.filter((item) => userListScope === 'platform' ? item.is_platform_admin : !item.is_platform_admin) : items;
   return (<>
-    <Panel title="Users" actions={can('users.create') ? <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Add User</>}</button> : undefined}>
-      {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
-
+    <Panel title="Users" actions={can('users.create') ? <Button onClick={() => setShowForm(!showForm)} variant="primary" icon={showForm ? X : Plus}>{showForm ? 'Cancel' : 'Add user'}</Button> : undefined}>
       {isPlatform && (
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
             <button type="button" onClick={() => { setUserListScope('platform'); setTenantFilter(''); }} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${userListScope === 'platform' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Platform users</button>
             <button type="button" onClick={() => setUserListScope('tenant')} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${userListScope === 'tenant' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Tenant users</button>
           </div>
-          {userListScope === 'tenant' && <label className="block w-full text-sm sm:w-72">
-            <span className="mb-1 block font-medium">Tenant filter</span>
-            <SearchSelect value={tenantFilter} onChange={setTenantFilter} placeholder="All tenants" options={[{value:'',label:'All tenants'},...tenants.map((tenant)=>({value:tenant.id,label:`${tenant.name} (${tenant.slug})`}))]} />
-          </label>}
+          {userListScope === 'tenant' && <TenantFilter className="w-full sm:w-72" value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />}
         </div>
       )}
 
@@ -164,14 +172,35 @@ export function UsersPage() {
                     <td className="py-3 font-medium">{item.name}</td>
                     <td>{item.email}</td>
                     <td>{item.roles || (item.is_platform_admin ? 'Platform user' : 'Tenant user')}</td>
-                    <td><StatusBadge status={item.status}/></td>
+                    <td>
+                      {can('users.update') ? (
+                        <StatusToggle
+                          value={item.status === 'active'}
+                          label={`${item.status === 'active' ? 'Disable' : 'Enable'} ${item.email}`}
+                          onToggle={() => requestConfirm({
+                            title: `${item.status === 'active' ? 'Disable' : 'Enable'} user`,
+                            description: 'Confirm user status change',
+                            body: <>Change <strong className="text-slate-900">{item.email}</strong> to <strong className="text-slate-900">{item.status === 'active' ? 'disabled' : 'enabled'}</strong>?</>,
+                            confirmLabel: item.status === 'active' ? 'Disable' : 'Enable',
+                            variant: item.status === 'active' ? 'danger' : 'primary',
+                            onConfirm: () => toggleUserStatus(item),
+                          })}
+                        />
+                      ) : <StatusBadge status={item.status}/>}
+                    </td>
                     {isPlatform && <td className="text-xs text-slate-500">{item.tenants || '-'}</td>}
                     <td>
                       <div className="flex gap-1">
-                        <button onClick={() => setViewingId(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button>
-                        {can('users.update') && <button onClick={() => startEdit(item)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Pencil size={12} />Edit</button>}
-                        {can('users.update') && <button onClick={() => toggleUserStatus(item)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Power size={12} />{item.status === 'active' ? 'Disable' : 'Enable'}</button>}
-                        {can('users.delete') && <button onClick={() => remove(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={12} />Delete</button>}
+                        <RowActionButton onClick={() => setViewingId(item.id)} icon={Eye}>View</RowActionButton>
+                        {can('users.update') && <RowActionButton onClick={() => startEdit(item)} icon={Pencil}>Edit</RowActionButton>}
+                        {can('users.delete') && <RowActionButton onClick={() => requestConfirm({
+                          title: 'Delete user',
+                          description: 'This action cannot be undone',
+                          body: <>Delete <strong className="text-slate-900">{item.email}</strong>?</>,
+                          confirmLabel: 'Delete user',
+                          variant: 'danger',
+                          onConfirm: () => remove(item.id),
+                        })} icon={Trash2} tone="danger">Delete</RowActionButton>}
                       </div>
                     </td>
               </tr>
@@ -199,5 +228,6 @@ export function UsersPage() {
     </Modal>}
     {editingUser && <Modal title="Edit user" description={`Update ${editingUser.name}'s account and role assignment.`} onClose={()=>setEditingId(null)} width="max-w-2xl" footer={<><ModalButton onClick={()=>setEditingId(null)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={()=>saveEdit(editingUser.id)}>{saving?'Saving...':'Save changes'}</ModalButton></>}><div className="space-y-4 px-6 py-5"><label className="block text-sm"><span className="mb-1 block font-medium">Full name</span><input value={editName} onChange={(e)=>setEditName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label><label className="block text-sm"><span className="mb-1 block font-medium">Email address</span><input value={editEmail} onChange={(e)=>setEditEmail(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label>{isPlatform&&<label className="block text-sm"><span className="mb-1 block font-medium">Assign role</span><SearchSelect value={editRoleId} onChange={setEditRoleId} placeholder="No role change" options={[{value:'',label:'No role change'},...editRoleOptions]}/></label>}</div></Modal>}
     {viewingUser && <Modal title="User details" description="Account identity, access level, and status." onClose={()=>setViewingId(null)} width="max-w-2xl" footer={<><ModalButton onClick={()=>setViewingId(null)}>Close</ModalButton>{can('users.update')&&<ModalButton variant="primary" onClick={()=>{setViewingId(null);startEdit(viewingUser)}}>Edit user</ModalButton>}</>}><dl className="grid gap-4 px-6 py-5 sm:grid-cols-2">{[['Name',viewingUser.name],['Email',viewingUser.email],['Role',viewingUser.roles || (viewingUser.is_platform_admin?'Platform user':'Tenant user')],['Status',viewingUser.status],['Created',viewingUser.created_at],...(isPlatform?[['Tenants',viewingUser.tenants||'-']]:[])].map(([label,value])=><div key={label} className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-medium uppercase text-slate-400">{label}</dt><dd className="mt-1 text-sm font-medium">{value}</dd></div>)}</dl></Modal>}
+    {confirmDialog}
   </>);
 }

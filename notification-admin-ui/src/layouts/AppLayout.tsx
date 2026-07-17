@@ -2,6 +2,7 @@ import { Bell, Building2, KeyRound, LayoutDashboard, LogOut, Megaphone, Send, Se
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { DataTableEnhancer } from '../components/DataTableEnhancer';
+import { Button } from '../components/Button';
 
 const platformNav = [
   { section: 'Platform', items: [
@@ -91,9 +92,7 @@ export function AppLayout() {
             <div className="text-sm font-medium">{user?.email}</div>
             <div className="text-xs text-slate-500">{user?.tenant_id || 'all tenants'}</div>
           </div>
-          <button onClick={logout} className="focus-ring inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">
-            <LogOut size={16} /> Logout
-          </button>
+          <Button onClick={logout} icon={LogOut}>Logout</Button>
         </header>
         <main className="p-6">
           <DataTableEnhancer />

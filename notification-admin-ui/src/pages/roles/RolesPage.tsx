@@ -2,10 +2,14 @@ import { FormEvent, useEffect, useState } from 'react';
 import { apiRequest, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
+import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
+import { TenantFilter } from '../../components/TenantFilter';
 import { StatusBadge } from '../../components/StatusBadge';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { Plus, Trash2, Pencil, Eye } from 'lucide-react';
+import { Eye, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { useToast } from '../../components/Toast';
 
 type Role = { id: string; tenant_id: string; name: string; key: string; scope: string; status: string; created_at: string };
 type Permission = { id: string; key: string; description: string };
@@ -23,6 +27,8 @@ function permissionCategory(key: string): string {
 
 export function RolesPage() {
   const { user, can } = useAuth();
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
+  const toast = useToast();
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<Role[]>([]);
   const [allPerms, setAllPerms] = useState<Permission[]>([]);
@@ -35,7 +41,6 @@ export function RolesPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [createPerms, setCreatePerms] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editPerms, setEditPerms] = useState<Set<string>>(new Set());
@@ -47,13 +52,13 @@ export function RolesPage() {
   const load = () => { setLoading(true); Promise.all([
     list<Role>('/admin/api/v1/roles').then((r) => setItems(r.data)),
     list<Permission>('/admin/api/v1/permissions').then((r) => setAllPerms(r.data)),
-  ]).catch((err) => setError(err.message)).finally(() => setLoading(false)); };
+  ]).catch((err) => toast.error('Unable to load roles', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false)); };
 
   useEffect(() => { load(); if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r)=>setTenants(r.data.filter((t)=>t.status==='active'))).catch(()=>{}); }, [isPlatform]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setSaving(true); setError(''); setMessage('');
+    setSaving(true); setError('');
     try {
       const createScope = isPlatform && roleView === 'platform' ? 'platform' : 'tenant';
       const createTenantId = isPlatform && roleView === 'tenant_custom' ? tenantId : '';
@@ -61,18 +66,18 @@ export function RolesPage() {
       if (createPerms.size) await apiRequest(`/admin/api/v1/roles/${created.id}/permissions`, { method: 'PUT', body: JSON.stringify({ permission_ids: Array.from(createPerms) }) });
       setName(''); setKey('');
       setTenantId(''); setCreatePerms(new Set());
-      setShowForm(false); setMessage('Role created');
+      setShowForm(false); toast.success('Role created', name);
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Create failed'); }
+    } catch (err) { toast.error('Unable to create role', err instanceof Error ? err.message : 'Create failed'); }
     finally { setSaving(false); }
   }
 
   async function remove(id: string) {
-    if (!confirm('Delete this role?')) return;
     try {
       await apiRequest(`/admin/api/v1/roles/${id}`, { method: 'DELETE' });
+      toast.success('Role deleted');
       load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Delete failed'); }
+    } catch (err) { toast.error('Unable to delete role', err instanceof Error ? err.message : 'Delete failed'); }
   }
 
   async function startEdit(item: Role) {
@@ -89,8 +94,8 @@ export function RolesPage() {
     try {
       await apiRequest(`/admin/api/v1/roles/${id}`, { method: 'PUT', body: JSON.stringify({ name: editName }) });
       await apiRequest(`/admin/api/v1/roles/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ permission_ids: Array.from(editPerms) }) });
-      setEditingId(null); setMessage('Role updated'); load();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Update failed'); }
+      setEditingId(null); toast.success('Role updated', editName); load();
+    } catch (err) { toast.error('Unable to update role', err instanceof Error ? err.message : 'Update failed'); }
     finally { setSaving(false); }
   }
 
@@ -99,7 +104,7 @@ export function RolesPage() {
       const res = await apiRequest<{ data: RoleDetail }>(`/admin/api/v1/roles/${id}`);
       setViewDetail(res.data);
       setViewingId(id);
-    } catch { setError('Failed to load role details'); }
+    } catch { toast.error('Unable to load role details'); }
   }
 
   function togglePerm(pid: string) {
@@ -126,10 +131,7 @@ export function RolesPage() {
   const createDisabled = saving || createNeedsTenant && !tenantId;
   const tenantName = (tenantID: string) => tenants.find((tenant) => tenant.id === tenantID)?.name || '';
   return (<>
-    <Panel title="Roles" actions={can('roles.manage') ? <button onClick={() => { setShowForm(!showForm); setEditingId(null); }} className="flex items-center gap-1 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white">{showForm ? 'Cancel' : <><Plus size={14} /> Create Role</>}</button> : undefined}>
-      {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {message && <div className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{message}</div>}
-
+    <Panel title="Roles" actions={can('roles.manage') ? <Button onClick={() => { setShowForm(!showForm); setEditingId(null); }} variant="primary" icon={showForm ? X : Plus}>{showForm ? 'Cancel' : 'Create role'}</Button> : undefined}>
       {isPlatform && (
         <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
@@ -137,10 +139,7 @@ export function RolesPage() {
             <button type="button" onClick={() => { setRoleView('tenant_defaults'); setTenantFilter(''); }} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${roleView === 'tenant_defaults' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Default tenant roles</button>
             <button type="button" onClick={() => setRoleView('tenant_custom')} className={`focus-ring rounded px-3 py-1.5 text-sm font-medium ${roleView === 'tenant_custom' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>Tenant custom roles</button>
           </div>
-          {roleView === 'tenant_custom' && <label className="block w-full text-sm sm:w-72">
-            <span className="mb-1 block font-medium">Tenant filter</span>
-            <SearchSelect value={tenantFilter} onChange={setTenantFilter} placeholder="All tenants" options={[{value:'',label:'All tenants'},...tenants.map((tenant)=>({value:tenant.id,label:`${tenant.name} (${tenant.slug})`}))]} />
-          </label>}
+          {roleView === 'tenant_custom' && <TenantFilter className="w-full sm:w-72" value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />}
         </div>
       )}
 
@@ -163,9 +162,16 @@ export function RolesPage() {
                     <td><StatusBadge status={item.status}/></td>
                     <td>
                       <div className="flex gap-1">
-                        <button onClick={() => viewRole(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Eye size={12} />View</button>
-                        {can('roles.manage') && <button onClick={() => startEdit(item)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-blue-600 hover:bg-blue-50"><Pencil size={12} />Edit</button>}
-                        {can('roles.manage') && <button onClick={() => remove(item.id)} className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"><Trash2 size={12} />Delete</button>}
+                        <RowActionButton onClick={() => viewRole(item.id)} icon={Eye}>View</RowActionButton>
+                        {can('roles.manage') && <RowActionButton onClick={() => startEdit(item)} icon={Pencil}>Edit</RowActionButton>}
+                        {can('roles.manage') && <RowActionButton onClick={() => requestConfirm({
+                          title: 'Delete role',
+                          description: 'This action cannot be undone',
+                          body: <>Delete <strong className="text-slate-900">{item.name}</strong>?</>,
+                          confirmLabel: 'Delete role',
+                          variant: 'danger',
+                          onConfirm: () => remove(item.id),
+                        })} icon={Trash2} tone="danger">Delete</RowActionButton>}
                       </div>
                     </td>
               </tr>
@@ -194,5 +200,6 @@ export function RolesPage() {
             </div>
           )}
         </div></Modal>}
+    {confirmDialog}
   </>);
 }

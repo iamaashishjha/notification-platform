@@ -1,5 +1,6 @@
 import { ReactNode, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { Check, LoaderCircle, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
+import { Button } from './Button';
 
 export function Modal({ title, description, children, footer, onClose, width = 'max-w-3xl' }: { title: string; description?: string; children: ReactNode; footer?: ReactNode; onClose: () => void; width?: 'max-w-md' | 'max-w-2xl' | 'max-w-3xl' | 'max-w-4xl' }) {
   useEffect(() => {
@@ -20,7 +21,17 @@ export function Modal({ title, description, children, footer, onClose, width = '
   </div>;
 }
 
+function modalIcon(children: ReactNode) {
+  const label = typeof children === 'string' ? children.toLowerCase() : '';
+  if (label.includes('creating') || label.includes('saving') || label.includes('deleting')) return LoaderCircle;
+  if (label.includes('cancel') || label.includes('close')) return X;
+  if (label.includes('delete') || label.includes('revoke')) return Trash2;
+  if (label.includes('edit')) return Pencil;
+  if (label.includes('create') || label.includes('add')) return Plus;
+  if (label.includes('save') || label.includes('saved')) return label.includes('saved') ? Check : Save;
+  return undefined;
+}
+
 export function ModalButton({ children, onClick, variant = 'secondary', disabled = false, type = 'button' }: { children: ReactNode; onClick?: () => void; variant?: 'primary' | 'secondary' | 'danger'; disabled?: boolean; type?: 'button' | 'submit' }) {
-  const colors = variant === 'primary' ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : variant === 'danger' ? 'border-red-600 bg-red-600 text-white hover:bg-red-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50';
-  return <button type={type} onClick={onClick} disabled={disabled} className={`focus-ring rounded-md border px-4 py-2 text-sm font-medium shadow-sm disabled:opacity-60 ${colors}`}>{children}</button>;
+  return <Button type={type} onClick={onClick} disabled={disabled} variant={variant} icon={modalIcon(children)} className={typeof children === 'string' && /creating|saving|deleting/i.test(children) ? '[&_svg]:animate-spin' : ''}>{children}</Button>;
 }

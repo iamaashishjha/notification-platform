@@ -15,7 +15,7 @@ export function DataTableEnhancer() {
   useEffect(() => {
     const cleanups: (() => void)[] = [];
     const enhance = (table: HTMLTableElement) => {
-      if (table.dataset.datatable || !table.tHead || !table.tBodies[0]) return;
+      if (table.dataset.noDatatable || table.dataset.datatable || !table.tHead || !table.tBodies[0]) return;
       const headers = Array.from(table.tHead.rows[0]?.cells || []); if (!headers.length) return;
       table.dataset.datatable = 'true';
       const host = table.parentElement!;

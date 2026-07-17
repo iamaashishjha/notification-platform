@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { apiRequest, list } from '../../api/client';
+import { apiRequest, getErrorMessage, list } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { StatusBadge } from '../../components/StatusBadge';
+import { Modal, ModalButton } from '../../components/Modal';
+import { useToast } from '../../components/Toast';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { Activity, Bell, CheckCircle2, FileText, Info, KeyRound, Layers3, LayoutDashboard, Megaphone, Plug, ScrollText, Users, UserRound, XCircle } from 'lucide-react';
+import { Activity, Bell, CheckCircle2, Eye, FileText, Info, KeyRound, Layers3, LayoutDashboard, Megaphone, Plug, ScrollText, Users, UserRound, XCircle } from 'lucide-react';
 
 type Tenant = { id: string; name: string; slug: string; status: string; created_at: string; updated_at: string };
 type Feature = { id: string; identifier: string; feature_key: string; name: string; description: string; category: string; enabled: boolean; created_at: string };
@@ -12,10 +15,11 @@ type Channel = { id: string; channel: string; enabled: boolean; direction: strin
 type Provider = { id: string; channel: string; provider: string; is_default: boolean; status: string; created_at: string };
 type Contact = { id: string; name: string; email: string; phone: string; status: string };
 type Group = { id: string; name: string; description: string; member_count: number; status: string };
-type Template = { id: string; template_key: string; channel: string; subject: string; status: string };
+type Template = { id: string; template_key: string; channel: string; subject: string; body?: string; status: string };
 type Campaign = { id: string; name: string; status: string; scheduled_at: string; created_at: string };
 type ApiKey = { id: string; name: string; status: string; last_used_at: string; created_at: string };
 type AuditLog = { id: string; action: string; actor_type: string; resource_type: string; created_at: string };
+type PreviewMode = 'text' | 'markdown' | 'html';
 type Overview = {
   tenant: Tenant;
   features: Feature[];
@@ -24,57 +28,276 @@ type Overview = {
   counts: { users: number; contacts: number; templates: number; campaigns: number; api_keys: number };
 };
 
-function Toggle({ value, onChange }: { value: boolean; onChange: () => void }) {
+function Toggle({ value, onChange, label }: { value: boolean; onChange: () => void; label: string }) {
   return (
-    <button onClick={onChange} className={`focus-ring relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${value ? 'bg-blue-600' : 'bg-slate-300'}`}>
+    <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onChange} className={`focus-ring relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${value ? 'bg-blue-600' : 'bg-slate-300'}`}>
       <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${value ? 'translate-x-4' : 'translate-x-0'}`} />
     </button>
   );
 }
 
+function StatusAction({ active, label, onConfirm }: { active: boolean; label: string; onConfirm: () => void }) {
+  return (
+    <div className="flex shrink-0 items-center">
+      <Toggle value={active} label={label} onChange={onConfirm} />
+    </div>
+  );
+}
+
+function EmptyOptions({ icon: Icon, title, message }: { icon: typeof Activity; title: string; message: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center">
+      <Icon className="mx-auto mb-2 text-slate-300" size={28} />
+      <p className="text-sm font-medium text-slate-600">{title}</p>
+      <p className="mt-1 text-xs text-slate-400">{message}</p>
+    </div>
+  );
+}
+
+function renderMarkdownLite(value: string) {
+  return value
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
+}
+
+function OptionCard({
+  active,
+  icon: Icon,
+  title,
+  badges,
+  description,
+  code,
+  action,
+  footer,
+}: {
+  active: boolean;
+  icon: typeof Activity;
+  title: string;
+  badges: string[];
+  description: string;
+  code: string;
+  action: ReactNode;
+  footer: ReactNode;
+}) {
+  return (
+    <article className={`rounded-lg border p-4 transition-colors ${active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/70'}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 gap-3">
+          <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${active ? 'bg-blue-50 text-blue-600' : 'bg-slate-200 text-slate-500'}`}>
+            <Icon size={18} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-semibold text-slate-900">{title}</h3>
+              {badges.map((badge) => (
+                <span key={badge} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium capitalize text-slate-500">{badge}</span>
+              ))}
+            </div>
+            <p className="mt-1 text-sm leading-5 text-slate-600">{description}</p>
+            <code className="mt-2 block break-all text-xs text-slate-400">{code}</code>
+          </div>
+        </div>
+        {action}
+      </div>
+      <div className={`mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs font-medium ${active ? 'text-emerald-700' : 'text-slate-500'}`}>
+        {footer}
+      </div>
+    </article>
+  );
+}
+
 function OverviewSection({ overview }: { overview: Overview }) {
   const t = overview.tenant;
+  const enabledFeatures = overview.features.filter((item) => item.enabled).length;
+  const enabledChannels = overview.channels.filter((item) => item.enabled).length;
+  const activeProviders = overview.providers.filter((item) => item.status === 'active').length;
+  const summaryCards = [
+    { label: 'Contacts', value: overview.counts.contacts, icon: UserRound, tone: 'blue' },
+    { label: 'Campaigns', value: overview.counts.campaigns, icon: Megaphone, tone: 'violet' },
+    { label: 'Templates', value: overview.counts.templates, icon: FileText, tone: 'amber' },
+    { label: 'API keys', value: overview.counts.api_keys, icon: KeyRound, tone: 'emerald' },
+    { label: 'Users', value: overview.counts.users, icon: Users, tone: 'slate' },
+  ];
+  const healthCards = [
+    { label: 'Enabled capabilities', value: `${enabledFeatures}/${overview.features.length}`, icon: Layers3, tone: 'blue' },
+    { label: 'Enabled channels', value: `${enabledChannels}/${overview.channels.length}`, icon: Bell, tone: 'emerald' },
+    { label: 'Active providers', value: `${activeProviders}/${overview.providers.length}`, icon: Plug, tone: 'amber' },
+  ];
+  const toneClasses: Record<string, string> = {
+    blue: 'bg-blue-50 text-blue-600',
+    violet: 'bg-violet-50 text-violet-600',
+    amber: 'bg-amber-50 text-amber-600',
+    emerald: 'bg-emerald-50 text-emerald-600',
+    slate: 'bg-slate-100 text-slate-600',
+  };
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div><span className="text-slate-500">Name</span><p className="font-medium">{t.name}</p></div>
-        <div><span className="text-slate-500">Slug</span><p className="font-medium">{t.slug}</p></div>
-        <div><span className="text-slate-500">Status</span><p className="mt-1"><StatusBadge status={t.status}/></p></div>
-        <div><span className="text-slate-500">Created</span><p className="font-medium">{t.created_at}</p></div>
+    <div className="space-y-5">
+      <div className="grid gap-4 text-sm lg:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-4"><span className="text-slate-500">Name</span><p className="mt-1 font-medium">{t.name}</p></div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4"><span className="text-slate-500">Slug</span><p className="mt-1 font-mono font-medium">{t.slug}</p></div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4"><span className="text-slate-500">Status</span><p className="mt-2"><StatusBadge status={t.status}/></p></div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4"><span className="text-slate-500">Created</span><p className="mt-1 font-medium">{new Date(t.created_at).toLocaleString()}</p></div>
       </div>
-      <div className="grid grid-cols-5 gap-4">
-        {Object.entries(overview.counts).map(([key, val]) => (
-          <div key={key} className="rounded-md border border-slate-200 p-3 text-center">
-            <div className="text-2xl font-bold text-blue-700">{val as number}</div>
-            <div className="text-xs text-slate-500">{key.replace(/_/g, ' ')}</div>
+
+      <div>
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">Workspace activity</h3>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          {summaryCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between"><div className="text-sm font-medium text-slate-500">{card.label}</div><span className={`rounded-lg p-2 ${toneClasses[card.tone]}`}><Icon size={16}/></span></div>
+                <div className="mt-3 text-2xl font-semibold text-slate-900">{card.value}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="mb-3 text-sm font-semibold text-slate-900">Configuration health</h3>
+        <div className="grid gap-4 md:grid-cols-3">
+          {healthCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between"><div className="text-sm font-medium text-slate-500">{card.label}</div><span className={`rounded-lg p-2 ${toneClasses[card.tone]}`}><Icon size={16}/></span></div>
+                <div className="mt-3 text-2xl font-semibold text-slate-900">{card.value}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Channel capacity</h3>
+            <p className="text-xs text-slate-500">Configured tenant channel limits</p>
           </div>
-        ))}
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">{enabledChannels} active</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {overview.channels.map((channel) => (
+            <div key={channel.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <div className="flex items-center justify-between"><span className="font-medium capitalize text-slate-800">{channel.channel.replace('_', ' ')}</span><StatusBadge status={channel.enabled}/></div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-500">
+                <span>Rate/s <b className="text-slate-800">{channel.rate_limit_per_second}</b></span>
+                <span>Daily <b className="text-slate-800">{channel.daily_quota}</b></span>
+              </div>
+            </div>
+          ))}
+          {overview.channels.length === 0 && <div className="rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400 md:col-span-2 xl:col-span-3">No channels configured</div>}
+        </div>
       </div>
     </div>
   );
 }
 
 function GenericTable({ columns, rows }: { columns: { key: string; label: string }[]; rows: Record<string, any>[] }) {
-  if (rows.length === 0) return <p className="py-4 text-center text-sm text-slate-400">No data</p>;
+  if (rows.length === 0) return <p className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">No data</p>;
+  const [primaryColumn, ...detailColumns] = columns;
   return (
-    <table className="w-full text-left text-sm">
-      <thead className="border-b border-slate-200 text-slate-500">
-        <tr>{columns.map((c) => <th key={c.key} className="py-2">{c.label}</th>)}</tr>
-      </thead>
-      <tbody>
-        {rows.map((row, i) => (
-          <tr key={row.id || i} className="border-b border-slate-100">
-            {columns.map((c) => <td key={c.key} className="py-2">{c.key === 'status' || c.key === 'enabled' ? <StatusBadge status={row[c.key]} /> : row[c.key] ?? '-'}</td>)}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="grid gap-3 xl:grid-cols-2">
+      {rows.map((row, i) => (
+        <article key={row.id || i} className="rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-200 hover:bg-blue-50/20">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{primaryColumn.label}</p>
+              <h3 className="mt-1 truncate font-semibold text-slate-900">{row[primaryColumn.key] ?? '-'}</h3>
+            </div>
+            {row.status !== undefined && <StatusBadge status={row.status} />}
+          </div>
+          <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2">
+            {detailColumns.map((column) => (
+              <div key={column.key}>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">{column.label}</dt>
+                <dd className="mt-1 break-all text-sm font-medium text-slate-700">
+                  {column.key === 'status' || column.key === 'enabled' ? <StatusBadge status={row[column.key]} /> : row[column.key] || '-'}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function TenantTemplates({ templates, onPreview }: { templates: Template[]; onPreview: (template: Template) => void }) {
+  if (templates.length === 0) return <p className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">No templates</p>;
+  return (
+    <div className="grid gap-3 xl:grid-cols-2">
+      {templates.map((template) => (
+        <article key={template.id} className="rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-blue-200 hover:bg-blue-50/20">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Template</p>
+              <h3 className="mt-1 truncate font-semibold text-slate-900">{template.template_key}</h3>
+            </div>
+            <StatusBadge status={template.status} />
+          </div>
+          <dl className="mt-4 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2">
+            <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Channel</dt><dd className="mt-1 text-sm font-medium capitalize text-slate-700">{template.channel || '-'}</dd></div>
+            <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Subject</dt><dd className="mt-1 truncate text-sm font-medium text-slate-700">{template.subject || '-'}</dd></div>
+          </dl>
+          <div className="mt-4 flex justify-end border-t border-slate-100 pt-3">
+            <button type="button" onClick={() => onPreview(template)} className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-white hover:text-blue-700">
+              <Eye size={14} /> Preview
+            </button>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function TenantTemplatePreview({ template, onClose }: { template: Template; onClose: () => void }) {
+  const [mode, setMode] = useState<PreviewMode>('text');
+  const body = template.body || '';
+  const width: 'max-w-4xl' | 'max-w-2xl' = body.length > 1200 || mode === 'html' ? 'max-w-4xl' : 'max-w-2xl';
+  return (
+    <Modal title={template.template_key} description="Tenant template preview." onClose={onClose} width={width} footer={<ModalButton onClick={onClose}>Close</ModalButton>}>
+      <div className="space-y-4 px-6 py-5">
+        <dl className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
+          <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Channel</dt><dd className="mt-1 text-sm font-medium capitalize text-slate-700">{template.channel || '-'}</dd></div>
+          <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Status</dt><dd className="mt-1"><StatusBadge status={template.status} /></dd></div>
+          <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-400">Mode</dt><dd className="mt-1 text-sm font-medium capitalize text-slate-700">{mode}</dd></div>
+        </dl>
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Preview</h3>
+              <p className="mt-0.5 text-xs text-slate-500">View this tenant template as text, markdown, or HTML.</p>
+            </div>
+            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-1">
+              {(['text', 'markdown', 'html'] as PreviewMode[]).map((item) => (
+                <button key={item} type="button" onClick={() => setMode(item)} className={`focus-ring rounded px-3 py-1.5 text-xs font-medium capitalize ${mode === item ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{item}</button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-3 p-4">
+            {template.subject && <div className="rounded-md bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800">{template.subject}</div>}
+            {mode === 'html' ? (
+              <iframe title="Tenant template HTML preview" className="h-72 w-full rounded-md border border-slate-200 bg-white" srcDoc={body || '<p></p>'} />
+            ) : mode === 'markdown' ? (
+              <div className="min-h-32 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">{renderMarkdownLite(body) || 'No body content'}</div>
+            ) : (
+              <pre className="min-h-32 whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-950 px-3 py-2 text-sm leading-6 text-slate-100">{body || 'No body content'}</pre>
+            )}
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
 export function TenantDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
   const { user } = useAuth();
   const isPlatform = user?.is_platform_admin;
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -89,13 +312,14 @@ export function TenantDetailPage() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [subLoading, setSubLoading] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     apiRequest<{ data: Overview }>(`/admin/api/v1/tenants/${id}/overview`)
       .then((res) => { setOverview(res.data); setError(''); })
-      .catch((err) => setError(err.message))
+      .catch((err) => setError(getErrorMessage(err, 'Unable to load tenant detail')))
       .finally(() => setLoading(false));
   }, [id]);
 
@@ -134,9 +358,11 @@ export function TenantDetailPage() {
           break;
         }
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      toast.error('Unable to load tenant data', getErrorMessage(err));
+    }
     finally { setSubLoading(false); }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (!id || tab === 'overview' || tab === 'features' || tab === 'channels' || tab === 'providers') return;
@@ -147,14 +373,41 @@ export function TenantDetailPage() {
     try {
       await apiRequest(`/admin/api/v1/features/${featureId}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
       setOverview((prev) => prev ? { ...prev, features: prev.features.map((f) => f.id === featureId ? { ...f, enabled } : f) } : prev);
-    } catch { /* ignore */ }
+      toast.success(enabled ? 'Capability enabled' : 'Capability disabled');
+    } catch (err) {
+      toast.error('Unable to update capability', getErrorMessage(err));
+    }
   }
 
   async function toggleChannelFn(channelId: string, enabled: boolean) {
     try {
       await apiRequest(`/admin/api/v1/channels/${channelId}`, { method: 'PUT', body: JSON.stringify({ enabled }) });
       setOverview((prev) => prev ? { ...prev, channels: prev.channels.map((c) => c.id === channelId ? { ...c, enabled } : c) } : prev);
-    } catch { /* ignore */ }
+      toast.success(enabled ? 'Channel enabled' : 'Channel disabled');
+    } catch (err) {
+      toast.error('Unable to update channel', getErrorMessage(err));
+    }
+  }
+
+  async function toggleProviderFn(providerId: string, active: boolean) {
+    try {
+      await apiRequest(`/admin/api/v1/providers/${providerId}`, { method: 'PUT', body: JSON.stringify({ status: active ? 'active' : 'disabled' }) });
+      setOverview((prev) => prev ? { ...prev, providers: prev.providers.map((p) => p.id === providerId ? { ...p, status: active ? 'active' : 'disabled' } : p) } : prev);
+      toast.success(active ? 'Provider enabled' : 'Provider disabled');
+    } catch (err) {
+      toast.error('Unable to update provider', getErrorMessage(err));
+    }
+  }
+
+  function confirmToggle(kind: string, name: string, active: boolean, onConfirm: () => void) {
+    requestConfirm({
+      title: `${active ? 'Enable' : 'Disable'} ${kind}`,
+      description: 'Confirm status change',
+      body: <>Change <strong className="text-slate-900">{name}</strong> to <strong className="text-slate-900">{active ? 'enabled' : 'disabled'}</strong>?</>,
+      confirmLabel: active ? 'Enable' : 'Disable',
+      variant: active ? 'primary' : 'danger',
+      onConfirm,
+    });
   }
 
   const tabs = ['overview', isPlatform && 'features', isPlatform && 'channels', isPlatform && 'providers', 'contacts', 'groups', 'templates', 'campaigns', 'api-keys', 'audit'].filter(Boolean) as string[];
@@ -177,34 +430,45 @@ export function TenantDetailPage() {
           </div>
           <div className="grid gap-3 xl:grid-cols-2">
             {ov.features.map((f) => (
-              <article key={f.id} className={`rounded-lg border p-4 transition-colors ${f.enabled ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/70'}`}>
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex min-w-0 gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${f.enabled ? 'bg-blue-50 text-blue-600' : 'bg-slate-200 text-slate-500'}`}><Layers3 size={18} /></span>
-                    <div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{f.name}</h3><span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{f.category}</span></div><p className="mt-1 text-sm leading-5 text-slate-600">{f.description}</p><code className="mt-2 block text-xs text-slate-400">{f.identifier || f.feature_key}</code></div>
-                  </div>
-                  <Toggle value={f.enabled} onChange={() => toggleFeature(f.id, !f.enabled)} />
-                </div>
-                <div className={`mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-3 text-xs font-medium ${f.enabled ? 'text-emerald-700' : 'text-slate-500'}`}>{f.enabled ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{f.enabled ? `Available to ${ov.tenant.name}` : `Not available to ${ov.tenant.name}`}</div>
-              </article>
+              <OptionCard
+                key={f.id}
+                active={f.enabled}
+                icon={Layers3}
+                title={f.name}
+                badges={[f.category]}
+                description={f.description}
+                code={f.identifier || f.feature_key}
+                action={<StatusAction active={f.enabled} label={`${f.enabled ? 'Disable' : 'Enable'} ${f.name}`} onConfirm={() => confirmToggle('capability', f.name, !f.enabled, () => toggleFeature(f.id, !f.enabled))} />}
+                footer={<>{f.enabled ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{f.enabled ? `Available to ${ov.tenant.name}` : `Not available to ${ov.tenant.name}`}</>}
+              />
             ))}
           </div>
-          {ov.features.length === 0 && <div className="rounded-lg border border-dashed border-slate-300 py-10 text-center"><Layers3 className="mx-auto mb-2 text-slate-300" size={28} /><p className="text-sm font-medium text-slate-600">No capabilities assigned</p><p className="mt-1 text-xs text-slate-400">This tenant does not have any catalog features configured.</p></div>}
+          {ov.features.length === 0 && <EmptyOptions icon={Layers3} title="No capabilities assigned" message="This tenant does not have any catalog features configured." />}
         </div>
       );
       case 'channels': return (
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-slate-200 text-slate-500"><tr><th className="py-2">Channel</th><th>Enabled</th><th>Direction</th><th>Rate/s</th><th>Daily Quota</th><th>Action</th></tr></thead>
-          <tbody>
+        <div>
+          <div className="mb-5 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+            <Info className="mt-0.5 shrink-0 text-blue-600" size={18} />
+            <div><div className="text-sm font-semibold text-blue-900">Tenant channels</div><p className="mt-0.5 text-sm leading-5 text-blue-700">Enable or disable delivery channels for {ov.tenant.name}. Channel limits remain visible so capacity can be reviewed before enabling.</p></div>
+          </div>
+          <div className="grid gap-3 xl:grid-cols-2">
             {ov.channels.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100">
-                <td className="py-3 font-medium capitalize">{c.channel}</td><td><StatusBadge status={c.enabled}/></td><td>{c.direction}</td><td>{c.rate_limit_per_second}</td><td>{c.daily_quota}</td>
-                <td><Toggle value={c.enabled} onChange={() => toggleChannelFn(c.id, !c.enabled)} /></td>
-              </tr>
+              <OptionCard
+                key={c.id}
+                active={c.enabled}
+                icon={Bell}
+                title={c.channel.replace(/_/g, ' ')}
+                badges={[c.direction]}
+                description={`Rate limit ${c.rate_limit_per_second}/s · Daily quota ${c.daily_quota}`}
+                code={c.channel}
+                action={<StatusAction active={c.enabled} label={`${c.enabled ? 'Disable' : 'Enable'} ${c.channel} channel`} onConfirm={() => confirmToggle('channel', c.channel.replace(/_/g, ' '), !c.enabled, () => toggleChannelFn(c.id, !c.enabled))} />}
+                footer={<>{c.enabled ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{c.enabled ? `Available to ${ov.tenant.name}` : `Not available to ${ov.tenant.name}`}</>}
+              />
             ))}
-            {ov.channels.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-slate-400">No channels configured</td></tr>}
-          </tbody>
-        </table>
+          </div>
+          {ov.channels.length === 0 && <EmptyOptions icon={Bell} title="No channels configured" message="This tenant does not have any delivery channels configured." />}
+        </div>
       );
       case 'providers': {
         const grouped: Record<string, Provider[]> = {};
@@ -214,26 +478,42 @@ export function TenantDetailPage() {
         }
         return (
           <div className="space-y-3">
-            {Object.entries(grouped).map(([channel, prows]) => (
-              <div key={channel}>
-                <h4 className="mb-1 text-sm font-semibold text-slate-600 capitalize">{channel}</h4>
-                <table className="w-full text-left text-sm">
-                  <thead className="border-b border-slate-200 text-slate-500"><tr><th className="py-1">Provider</th><th>Default</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {prows.map((p) => (
-                      <tr key={p.id} className="border-b border-slate-100"><td className="py-2">{p.provider}</td><td><StatusBadge status={p.is_default}/></td><td><StatusBadge status={p.status}/></td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-            {ov.providers.length === 0 && <p className="py-4 text-center text-sm text-slate-400">No providers configured</p>}
+            <div className="mb-5 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+              <Info className="mt-0.5 shrink-0 text-blue-600" size={18} />
+              <div><div className="text-sm font-semibold text-blue-900">Tenant providers</div><p className="mt-0.5 text-sm leading-5 text-blue-700">Review providers grouped by channel and disable tenant-specific provider configs without exposing provider credentials.</p></div>
+            </div>
+            <div className="grid gap-4 xl:grid-cols-2">
+              {Object.entries(grouped).map(([channel, prows]) => (
+                <div key={channel} className="space-y-3">
+                  <h4 className="text-sm font-semibold capitalize text-slate-600">{channel.replace(/_/g, ' ')}</h4>
+                  <div className="grid gap-3">
+                    {prows.map((p) => {
+                      const active = p.status === 'active';
+                      return (
+                        <OptionCard
+                          key={p.id}
+                          active={active}
+                          icon={Plug}
+                          title={p.provider}
+                          badges={[p.channel, ...(p.is_default ? ['default'] : [])]}
+                          description={p.is_default ? 'Default provider for this channel.' : 'Configured provider available for this tenant.'}
+                          code={p.id}
+                          action={<StatusAction active={active} label={`${active ? 'Disable' : 'Enable'} ${p.provider} provider`} onConfirm={() => confirmToggle('provider', p.provider, !active, () => toggleProviderFn(p.id, !active))} />}
+                          footer={<>{active ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{active ? 'Provider is active for this tenant' : 'Provider is disabled for this tenant'}</>}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {ov.providers.length === 0 && <EmptyOptions icon={Plug} title="No providers configured" message="This tenant does not have any provider configs yet." />}
           </div>
         );
       }
       case 'contacts': return <GenericTable columns={[{key:'name',label:'Name'},{key:'email',label:'Email'},{key:'phone',label:'Phone'},{key:'status',label:'Status'}]} rows={contacts} />;
       case 'groups': return <GenericTable columns={[{key:'name',label:'Name'},{key:'description',label:'Description'},{key:'member_count',label:'Members'},{key:'status',label:'Status'}]} rows={groups} />;
-      case 'templates': return <GenericTable columns={[{key:'template_key',label:'Key'},{key:'channel',label:'Channel'},{key:'subject',label:'Subject'},{key:'status',label:'Status'}]} rows={templates} />;
+      case 'templates': return <TenantTemplates templates={templates} onPreview={setPreviewTemplate} />;
       case 'campaigns': return <GenericTable columns={[{key:'name',label:'Name'},{key:'status',label:'Status'},{key:'scheduled_at',label:'Scheduled'},{key:'created_at',label:'Created'}]} rows={campaigns} />;
       case 'api-keys': return <GenericTable columns={[{key:'name',label:'Name'},{key:'status',label:'Status'},{key:'last_used_at',label:'Last Used'},{key:'created_at',label:'Created'}]} rows={apiKeys} />;
       case 'audit': return <GenericTable columns={[{key:'action',label:'Action'},{key:'actor_type',label:'Actor'},{key:'resource_type',label:'Resource'},{key:'created_at',label:'Time'}]} rows={auditLogs} />;
@@ -260,6 +540,8 @@ export function TenantDetailPage() {
       <Panel title={tabMeta[tab].label}>
         {renderTabContent()}
       </Panel>
+      {previewTemplate && <TenantTemplatePreview template={previewTemplate} onClose={() => setPreviewTemplate(null)} />}
+      {confirmDialog}
     </div>
   );
 }

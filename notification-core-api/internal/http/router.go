@@ -49,9 +49,11 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 
 	// Platform Catalog
 	mux.Handle("GET /admin/api/v1/feature-catalog", middleware.Chain(authSvc, "features.view", h.ListFeatureCatalog))
+	mux.Handle("PUT /admin/api/v1/feature-catalog/{identifier}", middleware.Chain(authSvc, "features.update", h.UpdateFeatureCatalog))
 	mux.Handle("GET /admin/api/v1/channel-catalog", middleware.Chain(authSvc, "channels.view", h.ListChannelCatalog))
 	mux.Handle("PUT /admin/api/v1/channel-catalog/{channel}", middleware.Chain(authSvc, "channels.update", h.UpdatePlatformChannel))
 	mux.Handle("GET /admin/api/v1/provider-types", middleware.Chain(authSvc, "providers.view", h.ListProviderTypes))
+	mux.Handle("PUT /admin/api/v1/provider-types/{provider}", middleware.Chain(authSvc, "providers.update", h.UpdateProviderType))
 
 	// Audit logs
 	mux.Handle("GET /admin/api/v1/audit-logs", middleware.Chain(authSvc, "audit_logs.view", h.ListAuditLogs))

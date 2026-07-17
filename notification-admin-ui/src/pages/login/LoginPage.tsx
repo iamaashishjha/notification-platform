@@ -1,6 +1,8 @@
 import { FormEvent, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import { Button } from '../../components/Button';
+import { LogIn } from 'lucide-react';
 
 export function LoginPage() {
   const { login, token } = useAuth();
@@ -37,9 +39,9 @@ export function LoginPage() {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" />
           </label>
           {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          <button disabled={loading} className="focus-ring w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+          <Button disabled={loading} variant="primary" icon={LogIn} className="w-full">
             {loading ? 'Signing in...' : 'Sign in'}
-          </button>
+          </Button>
         </div>
       </form>
     </main>

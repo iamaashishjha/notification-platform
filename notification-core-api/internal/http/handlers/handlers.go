@@ -340,10 +340,15 @@ func (h Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
+	tenantFilter := r.URL.Query().Get("tenant_id")
 	q := `SELECT al.id::text, al.action, al.actor_type, COALESCE(al.actor_user_id::text,''), al.resource_type, COALESCE(al.resource_id::text,''), COALESCE(al.ip_address,''), COALESCE(al.request_id,''), COALESCE(al.session_id,''), al.created_at`
 	args := []any{}
 	if p.IsPlatform {
 		q += `, COALESCE(t.name,'') AS tenant_name FROM audit_logs al LEFT JOIN tenants t ON t.id = al.tenant_id`
+		if tenantFilter != "" {
+			q += ` WHERE al.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
 	} else {
 		q += ` FROM audit_logs al WHERE al.tenant_id = $1`
 		args = append(args, p.TenantID)
@@ -379,10 +384,15 @@ func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
+	tenantFilter := r.URL.Query().Get("tenant_id")
 	q := `SELECT ak.id::text, ak.tenant_id::text, ak.name, COALESCE(ak.scopes_json::text,'[]'), ak.status, COALESCE(ak.last_used_at::text,''), ak.created_at`
 	args := []any{}
 	if p.IsPlatform {
 		q += `, COALESCE(t.name,'') AS tenant_name FROM tenant_api_keys ak LEFT JOIN tenants t ON t.id = ak.tenant_id`
+		if tenantFilter != "" {
+			q += ` WHERE ak.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
 	} else {
 		q += ` FROM tenant_api_keys ak WHERE ak.tenant_id = $1`
 		args = append(args, p.TenantID)
@@ -1707,11 +1717,11 @@ func (h Handler) GetTenantSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) UpdateTenantSettings(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	if !p.IsPlatform {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin only"})
+	tenantID := r.PathValue("id")
+	if !p.IsPlatform && p.TenantID != tenantID {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
 		return
 	}
-	tenantID := r.PathValue("id")
 	var req struct {
 		Timezone     *string         `json:"timezone"`
 		Country      *string         `json:"country"`
@@ -1769,15 +1779,17 @@ func (h Handler) ListFeatureCatalog(w http.ResponseWriter, r *http.Request) {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Category    string `json:"category"`
+		Status      string `json:"status"`
+		Enabled     bool   `json:"enabled"`
 		TenantCount int    `json:"tenant_count"`
 	}
 	rows, err := h.db.Query(r.Context(), `
-		SELECT fc.identifier, fc.identifier, fc.name, fc.description, fc.category,
+		SELECT fc.identifier, fc.identifier, fc.name, fc.description, fc.category, fc.status,
+			fc.status = 'active' AS enabled,
 			COUNT(tf.id) FILTER (WHERE tf.enabled) AS tenant_count
 		FROM feature_catalog fc
 		LEFT JOIN tenant_features tf ON tf.feature_key = fc.identifier
-		WHERE fc.status = 'active'
-		GROUP BY fc.identifier, fc.name, fc.description, fc.category
+		GROUP BY fc.identifier, fc.name, fc.description, fc.category, fc.status
 		ORDER BY fc.category, fc.name`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -1787,7 +1799,7 @@ func (h Handler) ListFeatureCatalog(w http.ResponseWriter, r *http.Request) {
 	var out []CatalogItem
 	for rows.Next() {
 		var item CatalogItem
-		if err := rows.Scan(&item.Identifier, &item.FeatureKey, &item.Name, &item.Description, &item.Category, &item.TenantCount); err != nil {
+		if err := rows.Scan(&item.Identifier, &item.FeatureKey, &item.Name, &item.Description, &item.Category, &item.Status, &item.Enabled, &item.TenantCount); err != nil {
 			continue
 		}
 		out = append(out, item)
@@ -1796,6 +1808,38 @@ func (h Handler) ListFeatureCatalog(w http.ResponseWriter, r *http.Request) {
 		out = []CatalogItem{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (h Handler) UpdateFeatureCatalog(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin required"})
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if decode(w, r, &req) != nil {
+		return
+	}
+	if req.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "enabled is required"})
+		return
+	}
+	status := "disabled"
+	if *req.Enabled {
+		status = "active"
+	}
+	result, err := h.db.Exec(r.Context(), `UPDATE feature_catalog SET status=$1, updated_at=now() WHERE identifier=$2`, status, r.PathValue("identifier"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "feature not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "feature catalog updated"})
 }
 
 func (h Handler) ListChannelCatalog(w http.ResponseWriter, r *http.Request) {
@@ -1862,26 +1906,14 @@ func (h Handler) ListProviderTypes(w http.ResponseWriter, r *http.Request) {
 		Provider    string `json:"provider"`
 		Channel     string `json:"channel"`
 		Description string `json:"description"`
+		Enabled     bool   `json:"enabled"`
 		TenantCount int    `json:"tenant_count"`
 	}
 	rows, err := h.db.Query(r.Context(), `
-		WITH platform_providers (provider, channel, description) AS (VALUES
-			('mock_email','email','Mock email provider for local testing'),
-			('smtp','email','SMTP email delivery via net/smtp'),
-			('sendgrid','email','SendGrid email API (placeholder)'),
-			('ses','email','Amazon SES email (placeholder)'),
-			('mock_sms','sms','Mock SMS provider for local testing'),
-			('generic_http_sms','sms','Generic HTTP SMS gateway'),
-			('sparrow','sms','Sparrow SMS gateway'),
-			('twilio','sms','Twilio SMS API (placeholder)'),
-			('mock_fcm','fcm','Mock FCM provider for local testing'),
-			('fcm','fcm','Firebase Cloud Messaging HTTP v1'),
-			('websocket','websocket','Internal WebSocket provider'),
-			('in_app','in_app','In-app notification store')
-		)
-		SELECT pp.provider, pp.channel, pp.description,
+		SELECT pp.provider, pp.channel, pp.description, pp.enabled,
 			COALESCE((SELECT COUNT(*) FROM tenant_provider_configs tpc WHERE tpc.provider = pp.provider), 0) AS tenant_count
-		FROM platform_providers pp ORDER BY pp.channel, pp.provider`)
+		FROM platform_providers pp
+		ORDER BY pp.channel, pp.provider`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
 		return
@@ -1890,7 +1922,7 @@ func (h Handler) ListProviderTypes(w http.ResponseWriter, r *http.Request) {
 	var out []ProviderTypeItem
 	for rows.Next() {
 		var item ProviderTypeItem
-		if err := rows.Scan(&item.Provider, &item.Channel, &item.Description, &item.TenantCount); err != nil {
+		if err := rows.Scan(&item.Provider, &item.Channel, &item.Description, &item.Enabled, &item.TenantCount); err != nil {
 			continue
 		}
 		out = append(out, item)
@@ -1899,6 +1931,34 @@ func (h Handler) ListProviderTypes(w http.ResponseWriter, r *http.Request) {
 		out = []ProviderTypeItem{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": out})
+}
+
+func (h Handler) UpdateProviderType(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if !p.IsPlatform {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "platform admin required"})
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if decode(w, r, &req) != nil {
+		return
+	}
+	if req.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "enabled is required"})
+		return
+	}
+	result, err := h.db.Exec(r.Context(), `UPDATE platform_providers SET enabled=$1, updated_at=now() WHERE provider=$2`, *req.Enabled, r.PathValue("provider"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "provider type not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"message": "provider type updated"})
 }
 
 func bcryptHash(password string) (string, error) {
