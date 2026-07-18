@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { apiRequest, list } from '../../api/client';
+import { FormEvent, useEffect, useState } from 'react';
+import { apiRequest, list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Button, RowActionButton } from '../../components/Button';
 import { useAuth } from '../../auth/AuthContext';
@@ -7,8 +7,11 @@ import { Plus, Play, Search, Send, X, XCircle } from 'lucide-react';
 import { Modal, ModalButton } from '../../components/Modal';
 import { TenantFilter } from '../../components/TenantFilter';
 import { StatusBadge } from '../../components/StatusBadge';
+import { TablePagination } from '../../components/TablePagination';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type Campaign = { id: string; tenant_id: string; tenant_name?: string; name: string; description: string; status: string; scheduled_at: string; created_at: string };
 type Tenant = { id: string; name: string; slug?: string; status: string };
@@ -29,23 +32,19 @@ export function CampaignsPage() {
   const [tenantFilter, setTenantFilter] = useState('');
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [search, setSearch] = useState('');
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination([tenantFilter, search]);
 
   useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r) => setTenants(r.data)).catch(() => {}); }, [isPlatform]);
 
   const load = () => {
     setLoading(true);
-    list<Campaign>('/admin/api/v1/campaigns' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : ''))
-      .then((res) => setItems(res.data))
+    listPage<Campaign>('/admin/api/v1/campaigns', { tenant_id: tenantFilter, q: search, page, per_page: perPage })
+      .then((res) => { setItems(res.data); setMeta(res.meta); })
       .catch((err) => toast.error('Unable to load campaigns', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [tenantFilter]);
-
-  const visibleItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return items;
-    return items.filter((item) => [item.name, item.description, item.tenant_name || '', item.status].some((value) => value.toLowerCase().includes(query)));
-  }, [items, search]);
+  useEffect(() => { load(); }, [tenantFilter, search, page, perPage]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -95,15 +94,16 @@ export function CampaignsPage() {
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
-      ) : visibleItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No campaigns found</div>
       ) : (
+        <>
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
             <tr><th className="py-2">Name</th>{isPlatform && <th>Tenant</th>}<th>Status</th><th>Scheduled</th><th>Created</th><th>Actions</th></tr>
           </thead>
           <tbody>
-            {visibleItems.map((item) => (
+            {items.map((item) => (
               <tr key={item.id} className="border-b border-slate-100">
                 <td className="py-3 font-medium">{item.name}</td>
                 {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
@@ -121,6 +121,8 @@ export function CampaignsPage() {
             ))}
           </tbody>
         </table>
+        <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />
+        </>
       )}
       {confirmDialog}
     </Panel>

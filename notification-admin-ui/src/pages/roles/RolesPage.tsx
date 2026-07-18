@@ -1,22 +1,25 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { apiRequest, list } from '../../api/client';
+import { apiRequest, list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
 import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
 import { TenantFilter } from '../../components/TenantFilter';
 import { StatusBadge } from '../../components/StatusBadge';
+import { TablePagination } from '../../components/TablePagination';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
 import { Eye, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type Role = { id: string; tenant_id: string; name: string; key: string; scope: string; status: string; created_at: string };
 type Permission = { id: string; key: string; description: string };
 type RoleDetail = Role & { permissions: Permission[] };
 type Tenant = { id: string; name: string; slug: string; status: string };
 
-const CATEGORIES = ['users', 'roles', 'permissions', 'tenants', 'providers', 'contacts', 'campaigns', 'templates', 'notifications', 'audit', 'api_keys', 'channels', 'features', 'settings', 'groups'];
+const CATEGORIES = ['users', 'roles', 'permissions', 'tenants', 'providers', 'contacts', 'campaigns', 'templates', 'notifications', 'audit', 'api_keys', 'channels', 'queue_controls', 'features', 'settings', 'groups'];
 
 function permissionCategory(key: string): string {
   for (const cat of CATEGORIES) {
@@ -48,13 +51,24 @@ export function RolesPage() {
   const [viewDetail, setViewDetail] = useState<RoleDetail | null>(null);
   const [roleView, setRoleView] = useState<'platform' | 'tenant_defaults' | 'tenant_custom'>('platform');
   const [tenantFilter, setTenantFilter] = useState('');
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination([roleView, tenantFilter]);
 
   const load = () => { setLoading(true); Promise.all([
-    list<Role>('/admin/api/v1/roles').then((r) => setItems(r.data)),
+    listPage<Role>('/admin/api/v1/roles', {
+      filter_scope: isPlatform && roleView === 'platform' ? 'platform' : 'tenant',
+      filter_tenant_id: isPlatform && roleView === 'tenant_custom' ? tenantFilter : undefined,
+      page,
+      per_page: perPage,
+    }).then((r) => {
+      setItems((roleView === 'tenant_defaults' ? r.data.filter((item) => !item.tenant_id) : r.data).filter((item) => !isPlatform || roleView !== 'tenant_custom' || tenantFilter || Boolean(item.tenant_id)));
+      setMeta(r.meta);
+    }),
     list<Permission>('/admin/api/v1/permissions').then((r) => setAllPerms(r.data)),
   ]).catch((err) => toast.error('Unable to load roles', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false)); };
 
-  useEffect(() => { load(); if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r)=>setTenants(r.data.filter((t)=>t.status==='active'))).catch(()=>{}); }, [isPlatform]);
+  useEffect(() => { load(); }, [isPlatform, roleView, tenantFilter, page, perPage]);
+  useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((r)=>setTenants(r.data.filter((t)=>t.status==='active'))).catch(()=>{}); }, [isPlatform]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -120,13 +134,7 @@ export function RolesPage() {
   }
 
   const editingRole = items.find((item) => item.id === editingId);
-  const visibleRoles = isPlatform
-    ? items.filter((item) => {
-      if (roleView === 'platform') return item.scope === 'platform';
-      if (roleView === 'tenant_defaults') return item.scope === 'tenant' && !item.tenant_id;
-      return item.scope === 'tenant' && Boolean(item.tenant_id) && (!tenantFilter || item.tenant_id === tenantFilter);
-    })
-    : items.filter((item) => item.scope === 'tenant');
+  const visibleRoles = items;
   const createNeedsTenant = isPlatform && roleView === 'tenant_custom';
   const createDisabled = saving || createNeedsTenant && !tenantId;
   const tenantName = (tenantID: string) => tenants.find((tenant) => tenant.id === tenantID)?.name || '';
@@ -148,6 +156,7 @@ export function RolesPage() {
       ) : visibleRoles.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No roles found</div>
       ) : (
+        <>
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
             <tr><th className="py-2">Name</th><th>Key</th><th>Scope</th>{isPlatform && <th>Tenant</th>}<th>Status</th><th>Actions</th></tr>
@@ -178,6 +187,8 @@ export function RolesPage() {
             ))}
           </tbody>
         </table>
+        <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />
+        </>
       )}
 
     </Panel>

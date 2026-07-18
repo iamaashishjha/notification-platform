@@ -6,24 +6,18 @@ import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
 import { TenantFilter } from '../../components/TenantFilter';
 import { StatusBadge } from '../../components/StatusBadge';
+import { TablePagination } from '../../components/TablePagination';
+import { StatusToggle } from '../../components/StatusToggle';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { CheckCircle2, Eye, Pencil, Plus, Trash2, X, XCircle } from 'lucide-react';
+import { Eye, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type User = { id: string; email: string; name: string; is_platform_admin: boolean; status: string; created_at: string; roles?: string; tenants?: string };
 type Role = { id: string; tenant_id?: string; name: string; key: string; scope: string };
 type Tenant = { id: string; name: string; slug: string; status: string };
-
-function StatusToggle({ value, label, onToggle }: { value: boolean; label: string; onToggle: () => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onToggle} className={`focus-ring inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium ${value ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-      {value ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-      <span>{value ? 'Enabled' : 'Disabled'}</span>
-      <span className={`relative h-4 w-7 rounded-full transition ${value ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${value ? 'left-[14px]' : 'left-0.5'}`} /></span>
-    </button>
-  );
-}
 
 export function UsersPage() {
   const { user, can } = useAuth();
@@ -50,15 +44,18 @@ export function UsersPage() {
   const [viewingId, setViewingId] = useState<string | null>(null);
   const [userListScope, setUserListScope] = useState<'platform' | 'tenant'>('platform');
   const [tenantFilter, setTenantFilter] = useState('');
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination([tenantFilter, userListScope]);
 
   const load = () => {
     setLoading(true);
     const userParams = new URLSearchParams();
     if (isPlatform) userParams.set('scope', userListScope);
     if (isPlatform && userListScope === 'tenant' && tenantFilter) userParams.set('tenant_id', tenantFilter);
-    const userQuery = userParams.toString();
+    userParams.set('page', String(page));
+    userParams.set('per_page', String(perPage));
     const requests = [
-      list<User>('/admin/api/v1/users' + (userQuery ? `?${userQuery}` : '')).then((res) => setItems(res.data)),
+      list<User>('/admin/api/v1/users?' + userParams.toString()).then((res) => { setItems(res.data); setMeta(res.meta); }),
       list<Role>('/admin/api/v1/roles').then((res) => setRoles(res.data)),
     ];
     if (isPlatform) {
@@ -67,7 +64,7 @@ export function UsersPage() {
     Promise.all(requests).catch((err) => toast.error('Unable to load users', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [tenantFilter, userListScope, isPlatform]);
+  useEffect(() => { load(); }, [tenantFilter, userListScope, isPlatform, page, perPage]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -144,7 +141,7 @@ export function UsersPage() {
   const createTenantRequired = isPlatform && createScope === 'tenant';
   const createRoleRequired = createScope === 'platform' || !isPlatform || Boolean(createTenantId);
   const createDisabled = saving || createTenantRequired && !createTenantId || createRoleRequired && !createRoleId;
-  const visibleItems = isPlatform ? items.filter((item) => userListScope === 'platform' ? item.is_platform_admin : !item.is_platform_admin) : items;
+  const visibleItems = items;
   return (<>
     <Panel title="Users" actions={can('users.create') ? <Button onClick={() => setShowForm(!showForm)} variant="primary" icon={showForm ? X : Plus}>{showForm ? 'Cancel' : 'Add user'}</Button> : undefined}>
       {isPlatform && (
@@ -162,6 +159,7 @@ export function UsersPage() {
       ) : visibleItems.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No users found</div>
       ) : (
+        <>
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
             <tr><th className="py-2">Name</th><th>Email</th><th>Role</th><th>Status</th>{isPlatform && <th>Tenants</th>}<th>Actions</th></tr>
@@ -207,6 +205,8 @@ export function UsersPage() {
             ))}
           </tbody>
         </table>
+        <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />
+        </>
       )}
 
     </Panel>

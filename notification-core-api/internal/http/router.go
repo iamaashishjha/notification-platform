@@ -35,6 +35,7 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 	mux.Handle("POST /admin/api/v1/ws/token", middleware.Chain(authSvc, "notifications.view", h.WebSocketToken))
 	mux.Handle("POST /admin/api/v1/notifications/send", middleware.Chain(authSvc, "notifications.send", h.SendAdminNotification))
 	mux.Handle("GET /admin/api/v1/notifications", middleware.Chain(authSvc, "notifications.view", h.ListNotificationLogs))
+	mux.Handle("GET /admin/api/v1/notifications/{public_id}", middleware.Chain(authSvc, "notifications.view", h.GetNotificationDetail))
 	mux.Handle("GET /admin/api/v1/tenants", middleware.Chain(authSvc, "tenants.view", h.ListTenants))
 	mux.Handle("POST /admin/api/v1/tenants", middleware.Chain(authSvc, "tenants.create", h.CreateTenant))
 	mux.Handle("GET /admin/api/v1/tenants/{id}", middleware.Chain(authSvc, "tenants.view", h.GetTenant))
@@ -46,6 +47,10 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 
 	// Dashboard
 	mux.Handle("GET /admin/api/v1/dashboard/stats", middleware.Chain(authSvc, "notifications.view", h.DashboardStats))
+
+	// Tenant integration guide and support view
+	mux.Handle("GET /admin/api/v1/integration", middleware.Chain(authSvc, "integration.view", h.GetMyIntegrationGuide))
+	mux.Handle("GET /admin/api/v1/tenants/{id}/integration", middleware.Chain(authSvc, "integration.view", h.GetTenantIntegrationGuide))
 
 	// Platform Catalog
 	mux.Handle("GET /admin/api/v1/feature-catalog", middleware.Chain(authSvc, "features.view", h.ListFeatureCatalog))
@@ -94,6 +99,8 @@ func NewRouter(cfg config.Config, log *zap.Logger, h handlers.Handler, authSvc a
 	// Channels
 	mux.Handle("GET /admin/api/v1/channels", middleware.Chain(authSvc, "channels.view", h.ListChannels))
 	mux.Handle("PUT /admin/api/v1/channels/{id}", middleware.Chain(authSvc, "channels.update", h.UpdateChannel))
+	mux.Handle("GET /admin/api/v1/queue-controls", middleware.Chain(authSvc, "queue_controls.view", h.ListQueueControls))
+	mux.Handle("PATCH /admin/api/v1/queue-controls/{id}", middleware.Chain(authSvc, "queue_controls.update", h.UpdateQueueControl))
 
 	// Provider configs
 	mux.Handle("GET /admin/api/v1/providers", middleware.Chain(authSvc, "providers.view", h.ListProviderConfigs))

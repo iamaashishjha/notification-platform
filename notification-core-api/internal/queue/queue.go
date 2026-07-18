@@ -31,6 +31,7 @@ type Job struct {
 	DeliveryID     string         `json:"delivery_id,omitempty"`
 	TenantID       string         `json:"tenant_id"`
 	Channel        string         `json:"channel,omitempty"`
+	QueueName      string         `json:"queue_name,omitempty"`
 	Payload        map[string]any `json:"payload,omitempty"`
 	Attempt        int            `json:"attempt,omitempty"`
 }

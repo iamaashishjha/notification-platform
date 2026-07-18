@@ -6,7 +6,7 @@ Modular multi-tenant notification platform with a Go backend, queue workers, Pos
 
 `notification-core-api` contains the REST API and worker binaries. The API accepts admin JWT requests and tenant API-key requests, validates tenant status, feature flags, channel settings, rate limits, and provider configuration, then stores notification records and publishes RabbitMQ jobs. Workers consume channel queues and write delivery attempts and delivery logs.
 
-`notification-admin-ui` is a React dashboard for platform admins and tenant users. Navigation is permission-aware, using effective permissions from the authenticated user.
+`notification-admin-ui` is a React dashboard for platform admins and tenant users. Navigation is permission-aware, using effective permissions from the authenticated user. The portal includes self-service investigation flows for notification logs, delivery attempts, lifecycle timelines, queue controls, provider configuration, audit logs, and manual notification sends.
 
 Core principle:
 
@@ -153,6 +153,20 @@ Passwords are bcrypt hashes. API keys are SHA-256 hashes. Provider secrets are e
 ## Observability
 
 Prometheus-format metrics at `GET /metrics` (27+ metrics): notification counters, queue stats, worker stats, provider send/fail rates (by channel), WebSocket stats, panic counter, HTTP request rate and latency histogram. See `docs/observability.md` for Prometheus scrape config, Grafana panel recommendations, and critical alerts.
+
+## Self-Service Operations
+
+The notification explorer supports paginated search by notification ID, event, idempotency key, channel, provider, status, tenant, and date range. Opening a notification shows a tenant-safe lifecycle timeline built from notification, delivery, and attempt records, including normalized failure categories and suggested actions.
+
+See [Self-service operations](docs/self-service-operations.md) for the requirement matrix, implemented APIs, database indexes, and remaining operations roadmap.
+
+## Tenant Integration Guide
+
+Tenant technical users can open **Integration** from the tenant portal to view tenant-aware setup status, API base URL, authentication guidance, rate limits, credential metadata, checklist progress, recent delivery errors, and copyable examples for cURL, JavaScript, Node.js, PHP, Laravel, Python, and Go.
+
+Platform administrators can open the same tenant-scoped guide under **Tenants → Tenant Details → Integration**. Existing API key secrets are never redisplayed.
+
+See [Tenant integration guide](docs/tenant-integration-guide.md) for endpoints, permissions, security notes, and current OpenAPI/webhook limitations.
 
 ## Granular Permissions
 

@@ -25,10 +25,10 @@ func (h Handler) ListRoles(w http.ResponseWriter, r *http.Request) {
 			q += ` WHERE tenant_id = $1 OR (tenant_id IS NULL AND scope = 'tenant')`
 			args = append(args, tenantFilter)
 		}
-		q += ` ORDER BY created_at DESC LIMIT 100`
+		q += ` ORDER BY created_at DESC`
 		rows, err = h.db.Query(r.Context(), q, args...)
 	} else {
-		rows, err = h.db.Query(r.Context(), `SELECT id::text, COALESCE(tenant_id::text,''), name, key, scope, status, created_at FROM roles WHERE scope != 'platform' AND (tenant_id = $1 OR tenant_id IS NULL) ORDER BY created_at DESC LIMIT 100`, p.TenantID)
+		rows, err = h.db.Query(r.Context(), `SELECT id::text, COALESCE(tenant_id::text,''), name, key, scope, status, created_at FROM roles WHERE scope != 'platform' AND (tenant_id = $1 OR tenant_id IS NULL) ORDER BY created_at DESC`, p.TenantID)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})

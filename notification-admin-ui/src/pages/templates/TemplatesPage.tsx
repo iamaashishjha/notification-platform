@@ -1,11 +1,14 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
-import { apiRequest, list } from '../../api/client';
+import { FormEvent, ReactNode, useEffect, useState } from 'react';
+import { apiRequest, list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
 import { TenantFilter } from '../../components/TenantFilter';
+import { TablePagination } from '../../components/TablePagination';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 import {
   AlertTriangle,
   Braces,
@@ -115,29 +118,22 @@ export function TemplatesPage() {
   const [modal, setModal] = useState<ModalState>(null);
   const [form, setForm] = useState<FormValues>(emptyForm);
   const [formPreviewMode, setFormPreviewMode] = useState<PreviewMode>('text');
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination([tenantFilter, search, channelFilter]);
 
   function load() {
     setLoading(true);
     setError('');
-    const endpoint = '/admin/api/v1/templates' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : '');
-    list<Template>(endpoint)
-      .then((res) => setItems(res.data))
+    listPage<Template>('/admin/api/v1/templates', { tenant_id: tenantFilter, q: search, filter_channel: channelFilter, page, per_page: perPage })
+      .then((res) => { setItems(res.data); setMeta(res.meta); })
       .catch((err) => toast.error('Unable to load templates', err instanceof Error ? err.message : 'Load failed'))
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [tenantFilter]);
+  useEffect(load, [tenantFilter, search, channelFilter, page, perPage]);
   useEffect(() => {
     if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((res) => setTenants(res.data)).catch(() => undefined);
   }, [isPlatform]);
-
-  const filteredItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return items.filter((item) => {
-      const matchesSearch = !query || [item.template_key, item.subject, item.tenant_name, item.body].some((value) => value?.toLowerCase().includes(query));
-      return matchesSearch && (!channelFilter || item.channel === channelFilter);
-    });
-  }, [items, search, channelFilter]);
 
   function openCreate() {
     setForm({ ...emptyForm, tenantId: tenantFilter });
@@ -237,9 +233,9 @@ export function TemplatesPage() {
               <tbody className="divide-y divide-slate-100 bg-white">
                 {loading ? (
                   <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-16 text-center text-slate-400">Loading templates…</td></tr>
-                ) : filteredItems.length === 0 ? (
+                ) : items.length === 0 ? (
                   <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-16 text-center"><FileText className="mx-auto mb-3 text-slate-300" size={30} /><p className="font-medium text-slate-600">No templates found</p><p className="mt-1 text-xs text-slate-400">Try changing your filters or create a new template.</p></td></tr>
-                ) : filteredItems.map((item) => (
+                ) : items.map((item) => (
                   <tr key={item.id} className="group hover:bg-slate-50/70">
                     <td className="px-4 py-3.5"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500"><Braces size={17} /></span><div><div className="font-semibold text-slate-800">{item.template_key}</div><div className="mt-0.5 text-xs text-slate-400">Updated template</div></div></div></td>
                     {isPlatform && <td className="px-4 py-3.5 text-slate-600">{item.tenant_name || '—'}</td>}
@@ -256,8 +252,8 @@ export function TemplatesPage() {
               </tbody>
             </table>
           </div>
-          {!loading && filteredItems.length > 0 && <div className="border-t border-slate-200 bg-slate-50 px-4 py-2.5 text-xs text-slate-500">Showing {filteredItems.length} of {items.length} templates</div>}
         </div>
+        {!loading && <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />}
       </Panel>
 
       {(modal?.mode === 'create' || modal?.mode === 'edit') && (

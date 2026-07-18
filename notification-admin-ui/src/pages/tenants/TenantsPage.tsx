@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { apiRequest, list } from '../../api/client';
+import { apiRequest, list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
 import { Button, RowActionButton } from '../../components/Button';
 import { StatusBadge } from '../../components/StatusBadge';
 import { SearchSelect } from '../../components/SearchSelect';
+import { TablePagination } from '../../components/TablePagination';
+import { StatusToggle } from '../../components/StatusToggle';
+import { FilterToolbar, SearchControl, SelectFilter } from '../../components/ListFilters';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
 import { useToast } from '../../components/Toast';
-import { Bell, CheckCircle2, Eye, FileText, Layers3, Pencil, Plus, Trash2, XCircle } from 'lucide-react';
+import { Bell, Eye, FileText, Layers3, Pencil, Plus, Trash2, XCircle } from 'lucide-react';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type Tenant = { id: string; name: string; slug: string; status: string; created_at: string };
 type CatalogFeature = { identifier: string; name: string; category: string };
@@ -18,16 +23,6 @@ type ProviderType = { provider: string; channel: string; enabled?: boolean };
 type StarterTemplate = { template_key: string; channel: string; subject: string; body: string };
 type ProvisionForm = { name:string; slug:string; timezone:string; country:string; default_sender:string; default_sms:string; features:string[]; channels:string[]; providers:Record<string,string>; templates:StarterTemplate[] };
 const emptyProvision: ProvisionForm = { name:'',slug:'',timezone:'',country:'',default_sender:'',default_sms:'',features:[],channels:[],providers:{},templates:[] };
-
-function StatusToggle({ value, label, onToggle }: { value: boolean; label: string; onToggle: () => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} aria-label={label} onClick={onToggle} className={`focus-ring inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium ${value ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-      {value ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-      <span>{value ? 'Enabled' : 'Disabled'}</span>
-      <span className={`relative h-4 w-7 rounded-full transition ${value ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${value ? 'left-[14px]' : 'left-0.5'}`} /></span>
-    </button>
-  );
-}
 
 export function TenantsPage() {
   const { can, user } = useAuth();
@@ -48,12 +43,17 @@ export function TenantsPage() {
   const [channels, setChannels] = useState<CatalogChannel[]>([]);
   const [providerTypes, setProviderTypes] = useState<ProviderType[]>([]);
   const [saving, setSaving] = useState(false);
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const { page, perPage, setPage, setPerPage } = usePagination([search, statusFilter]);
 
   function load() {
     setLoading(true);
-    list<Tenant>('/admin/api/v1/tenants').then((res) => setItems(res.data)).catch((err) => setError(err.message)).finally(() => setLoading(false));
+    listPage<Tenant>('/admin/api/v1/tenants', { q: search, filter_status: statusFilter, page, per_page: perPage }).then((res) => { setItems(res.data); setMeta(res.meta); }).catch((err) => setError(err.message)).finally(() => setLoading(false));
   }
-  useEffect(()=>{load();Promise.all([list<CatalogFeature>('/admin/api/v1/feature-catalog').then(r=>setFeatures(r.data)),list<CatalogChannel>('/admin/api/v1/channel-catalog').then(r=>setChannels(r.data.filter(c=>c.enabled))),list<ProviderType>('/admin/api/v1/provider-types').then(r=>setProviderTypes(r.data.filter((provider)=>provider.enabled !== false)))]).catch(()=>{});}, []);
+  useEffect(load, [search, statusFilter, page, perPage]);
+  useEffect(()=>{Promise.all([list<CatalogFeature>('/admin/api/v1/feature-catalog').then(r=>setFeatures(r.data)),list<CatalogChannel>('/admin/api/v1/channel-catalog').then(r=>setChannels(r.data.filter(c=>c.enabled))),list<ProviderType>('/admin/api/v1/provider-types').then(r=>setProviderTypes(r.data.filter((provider)=>provider.enabled !== false)))]).catch(()=>{});}, []);
 
   const payload = () => ({ name:form.name,slug:form.slug,settings:{timezone:form.timezone,country:form.country,default_sender:form.default_sender,default_sms:form.default_sms},features:form.features,channels:channels.map(c=>({channel:c.channel,enabled:form.channels.includes(c.channel),direction:c.channel==='websocket'||c.channel==='in_app'?'two_way':'one_way',rate_limit_per_second:10,daily_quota:10000})),providers:form.channels.filter(c=>form.providers[c]).map(channel=>({channel,provider:form.providers[channel],is_default:true})),templates:form.templates });
 
@@ -95,12 +95,23 @@ export function TenantsPage() {
       actions={isPlatform ? <Button onClick={() => { setForm(emptyProvision); setCreateErr(''); setShowCreate(true); }} variant="primary" icon={Plus}>Create tenant</Button> : undefined}
     >
       {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      <FilterToolbar>
+        <SearchControl id="tenant-search" label="Search tenants" value={search} onChange={setSearch} placeholder="Name, slug, status, or ID" />
+        <SelectFilter id="tenant-status" label="Status" value={statusFilter} onChange={setStatusFilter}>
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="disabled">Disabled</option>
+          <option value="suspended">Suspended</option>
+        </SelectFilter>
+        {(search || statusFilter) && <Button size="sm" icon={XCircle} onClick={() => { setSearch(''); setStatusFilter(''); }} className="template-clear-filters">Clear filters</Button>}
+      </FilterToolbar>
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
       ) : items.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No tenants found</div>
       ) : (
+        <>
         <table className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
             <tr><th className="py-2">Workspace</th><th>Slug</th><th>Status</th><th>Created</th><th className="text-right">Actions</th></tr>
@@ -151,6 +162,8 @@ export function TenantsPage() {
             ))}
           </tbody>
         </table>
+        <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />
+        </>
       )}
     </Panel>
     {showCreate&&<TenantProvisionModal title="Create tenant" error={createErr} form={form} setForm={setForm} features={features} channels={channels} providerTypes={providerTypes} saving={saving} onClose={()=>setShowCreate(false)} onSave={handleCreate}/>}

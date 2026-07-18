@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { list } from '../../api/client';
+import { useEffect, useState } from 'react';
+import { list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
 import { Button, RowActionButton } from '../../components/Button';
 import { TenantFilter } from '../../components/TenantFilter';
+import { TablePagination } from '../../components/TablePagination';
+import { FilterToolbar, SearchControl } from '../../components/ListFilters';
 import { useAuth } from '../../auth/AuthContext';
-import { Eye, Search, X } from 'lucide-react';
+import { Eye, X } from 'lucide-react';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type AuditLog = { id: string; action: string; actor_type: string; actor_user_id: string; resource_type: string; resource_id: string; ip_address: string; request_id?: string; session_id?: string; created_at: string; tenant_name?: string };
 type Tenant = { id: string; name: string; slug?: string; status: string };
@@ -17,23 +21,22 @@ export function AuditLogsPage() {
   const isPlatform = user?.is_platform_admin ?? false;
   const [items, setItems] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<AuditLog | null>(null);
+  const [selectedSession, setSelectedSession] = useState('');
+  const [selectedLogs, setSelectedLogs] = useState<AuditLog[]>([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
   const [tenantFilter, setTenantFilter] = useState('');
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [search, setSearch] = useState('');
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination([tenantFilter, search]);
 
   useEffect(() => {
     setLoading(true);
-    list<AuditLog>('/admin/api/v1/audit-logs' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : '')).then((res) => setItems(res.data)).catch((err) => toast.error('Unable to load audit logs', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
-  }, [tenantFilter, toast]);
+    listPage<AuditLog>('/admin/api/v1/audit-logs', { tenant_id: tenantFilter, q: search, page, per_page: perPage }).then((res) => { setItems(res.data); setMeta(res.meta); }).catch((err) => toast.error('Unable to load audit logs', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
+  }, [tenantFilter, search, page, perPage, toast]);
   useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((res)=>setTenants(res.data)).catch(()=>{}); }, [isPlatform]);
 
-  const visibleItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return items;
-    return items.filter((item) => [item.action, item.actor_type, item.actor_user_id, item.resource_type, item.resource_id, item.ip_address, item.request_id || '', item.session_id || '', item.tenant_name || ''].some((value) => value.toLowerCase().includes(query)));
-  }, [items, search]);
-  const grouped = visibleItems.reduce<Record<string, AuditLog[]>>((acc, item) => {
+  const grouped = items.reduce<Record<string, AuditLog[]>>((acc, item) => {
     const key = item.session_id || 'No session';
     if (!acc[key]) acc[key] = [];
     acc[key].push(item);
@@ -41,25 +44,34 @@ export function AuditLogsPage() {
   }, {});
   const sessions = Object.entries(grouped);
 
+  async function viewSession(sessionID: string) {
+    setSelectedSession(sessionID);
+    setSessionLoading(true);
+    try {
+      const res = await listPage<AuditLog>('/admin/api/v1/audit-logs', { tenant_id: tenantFilter, q: sessionID, per_page: 100 });
+      setSelectedLogs(res.data.filter((item) => (item.session_id || 'No session') === sessionID));
+    } catch (err) {
+      toast.error('Unable to load audit session', err instanceof Error ? err.message : 'Load failed');
+      setSelectedLogs([]);
+    } finally {
+      setSessionLoading(false);
+    }
+  }
+
   return (<>
     <Panel title="Audit Logs">
-      <div className="template-toolbar">
-        <div className="template-search-control">
-          <label htmlFor="audit-search">Search audit logs</label>
-          <div className="template-control-input">
-            <Search aria-hidden="true" size={16} />
-            <input id="audit-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Action, actor, resource, session, tenant, or IP" />
-          </div>
-        </div>
+      <FilterToolbar>
+        <SearchControl id="audit-search" label="Search audit logs" value={search} onChange={setSearch} placeholder="Action, actor, resource, session, tenant, or IP" />
         {isPlatform && <TenantFilter className="template-filter-control template-tenant-control" value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />}
         {(search || tenantFilter) && <Button size="sm" icon={X} onClick={() => { setSearch(''); setTenantFilter(''); }} className="template-clear-filters">Clear filters</Button>}
-      </div>
+      </FilterToolbar>
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
-      ) : visibleItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No audit logs found</div>
       ) : (
+        <>
         <div className="space-y-6">
           {sessions.map(([sessionID, logs]) => (
             <section key={sessionID} className="rounded-md border border-slate-200">
@@ -68,7 +80,7 @@ export function AuditLogsPage() {
                   <h2 className="text-sm font-semibold text-slate-900">Session</h2>
                   <p className="font-mono text-xs text-slate-500">{sessionID}</p>
                 </div>
-                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm">{logs.length} events</span>
+                <button type="button" onClick={() => viewSession(sessionID)} className="focus-ring rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-600 shadow-sm hover:bg-blue-50">{logs.length} events</button>
               </div>
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-slate-200 text-slate-500">
@@ -84,7 +96,7 @@ export function AuditLogsPage() {
                       <td>{item.ip_address || '-'}</td>
                       <td>{item.created_at}</td>
                       {isPlatform && <td className="text-xs text-slate-500">{item.tenant_name || '-'}</td>}
-                      <td><RowActionButton onClick={() => setSelected(item)} icon={Eye}>View</RowActionButton></td>
+                      <td><RowActionButton onClick={() => viewSession(item.session_id || 'No session')} icon={Eye}>View</RowActionButton></td>
                     </tr>
                   ))}
                 </tbody>
@@ -92,8 +104,17 @@ export function AuditLogsPage() {
             </section>
           ))}
         </div>
+        <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />
+        </>
       )}
     </Panel>
-    {selected&&<Modal title="Audit event" description="Immutable activity record and request context." onClose={()=>setSelected(null)} width="max-w-2xl" footer={<ModalButton onClick={()=>setSelected(null)}>Close</ModalButton>}><dl className="grid gap-4 px-6 py-5 sm:grid-cols-2">{[['Action',selected.action],['Actor',`${selected.actor_type} (${selected.actor_user_id||'system'})`],['Resource',`${selected.resource_type}${selected.resource_id?` #${selected.resource_id}`:''}`],['Session ID',selected.session_id||'-'],['Request ID',selected.request_id||'-'],['IP address',selected.ip_address||'-'],['Timestamp',selected.created_at],...(isPlatform?[['Tenant',selected.tenant_name||'-']]:[])].map(([label,value])=><div key={label} className="rounded-lg bg-slate-50 p-3"><dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</dt><dd className="mt-1 break-all text-sm font-medium">{value}</dd></div>)}</dl></Modal>}
+    {selectedSession&&<Modal title="Audit session" description={selectedSession} onClose={()=>{setSelectedSession('');setSelectedLogs([])}} width="max-w-4xl" footer={<ModalButton onClick={()=>{setSelectedSession('');setSelectedLogs([])}}>Close</ModalButton>}>
+      {sessionLoading ? <div className="py-12 text-center text-slate-400">Loading session events...</div> : selectedLogs.length === 0 ? <div className="py-12 text-center text-slate-400">No audit events found for this session</div> : <div className="max-h-[65vh] overflow-auto px-6 py-5">
+        <table className="w-full min-w-[900px] text-left text-sm">
+          <thead className="border-b border-slate-200 text-slate-500"><tr><th className="py-2">Action</th><th>Actor</th><th>Resource</th><th>Resource ID</th><th>Request</th><th>IP</th><th>Time</th>{isPlatform&&<th>Tenant</th>}</tr></thead>
+          <tbody>{selectedLogs.map((item)=><tr key={item.id} className="border-b border-slate-100"><td className="py-3 font-medium">{item.action}</td><td>{item.actor_type}</td><td>{item.resource_type}</td><td className="font-mono text-xs">{item.resource_id||'-'}</td><td className="font-mono text-xs">{item.request_id||'-'}</td><td>{item.ip_address||'-'}</td><td>{item.created_at}</td>{isPlatform&&<td className="text-xs text-slate-500">{item.tenant_name||'-'}</td>}</tr>)}</tbody>
+        </table>
+      </div>}
+    </Modal>}
   </>);
 }

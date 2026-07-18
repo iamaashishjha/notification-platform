@@ -22,6 +22,8 @@ import { ChannelsPage } from '../pages/channels/ChannelsPage';
 import { ProvidersPage } from '../pages/providers/ProvidersPage';
 import { GroupsPage } from '../pages/groups/GroupsPage';
 import { SettingsPage } from '../pages/settings/SettingsPage';
+import { QueueControlsPage } from '../pages/queues/QueueControlsPage';
+import { IntegrationPage } from '../pages/integration/IntegrationPage';
 import { ToastProvider } from '../components/Toast';
 import './styles.css';
 
@@ -56,6 +58,8 @@ function App() {
               <Route path="/features" element={<FeaturesPage />} />
               <Route path="/channels" element={<ChannelsPage />} />
               <Route path="/providers" element={<ProvidersPage />} />
+              <Route path="/queues" element={<QueueControlsPage />} />
+              <Route path="/integration" element={<IntegrationPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Routes>

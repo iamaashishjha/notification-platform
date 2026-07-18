@@ -39,6 +39,18 @@ func (w Worker) Run(ctx context.Context, queueName string) error {
 				_ = msg.Nack(false, false)
 				continue
 			}
+			if action, err := w.applyQueueControl(ctx, job); err != nil {
+				w.log.Error("queue control check failed", zap.Error(err), zap.String("delivery_id", job.DeliveryID), zap.String("queue_name", job.QueueName))
+				_ = msg.Nack(false, true)
+				continue
+			} else if action == "paused" {
+				time.Sleep(2 * time.Second)
+				_ = msg.Nack(false, true)
+				continue
+			} else if action == "stopped" {
+				_ = msg.Ack(false)
+				continue
+			}
 			if err := w.handle(ctx, job); err != nil {
 				w.log.Error("delivery failed", zap.Error(err), zap.String("delivery_id", job.DeliveryID), zap.String("channel", job.Channel))
 				job.Attempt++
@@ -51,6 +63,22 @@ func (w Worker) Run(ctx context.Context, queueName string) error {
 			_ = msg.Ack(false)
 		}
 	}
+}
+
+func (w Worker) applyQueueControl(ctx context.Context, job queue.Job) (string, error) {
+	control, err := queue.GetControl(ctx, w.db, job.TenantID, job.Channel)
+	if err != nil {
+		return "", err
+	}
+	if control.Status == "paused" {
+		_, _ = w.db.Exec(ctx, `UPDATE notification_deliveries SET status = 'queued', response_json = jsonb_set(response_json, '{queue_status}', '"paused"', true), updated_at = now() WHERE id = $1`, job.DeliveryID)
+		return "paused", nil
+	}
+	if control.Status == "stopped" {
+		_, err := w.db.Exec(ctx, `UPDATE notification_deliveries SET status = 'blocked', response_json = jsonb_set(response_json, '{queue_status}', '"stopped"', true), updated_at = now() WHERE id = $1`, job.DeliveryID)
+		return "stopped", err
+	}
+	return "", nil
 }
 
 func (w Worker) handle(ctx context.Context, job queue.Job) error {

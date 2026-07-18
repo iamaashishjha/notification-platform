@@ -52,6 +52,7 @@
 - TenantDetailPage: `/tenants/:id` with Overview/Features/Channels/Providers tabs ✓
 - TenantsPage: Create/View/Edit/Disable row actions, create form, inline edit ✓
 - All list pages: loading states, empty states, actions columns added ✓
+- Admin list APIs accept `page` and `per_page` query parameters and return pagination `meta`; admin table pagination is displayed below tables rather than in the top filter toolbar ✓
 - Auth: tenant CRUD permissions (tenants.view/create/update/delete) in granular-to-broad map ✓
 
 ## Contacts
@@ -81,16 +82,19 @@
 - Templates UI with list/create/delete ✓
 
 ## Notifications
-**Status: Complete**
+**Status: Complete (core), Partial (self-service operations)**
 
 - Full send flow: auth → tenant check → features → channels → rate limit → DB insert → queue publish ✓
 - Public API key send endpoint ✓
 - Admin JWT send endpoint ✓
 - Scheduled notification support ✓
-- Notification log listing (scoped by tenant) ✓
+- Notification explorer listing with tenant scoping, filters, pagination metadata, and bottom table pagination ✓
+- Notification detail API and portal view with deliveries, attempts, lifecycle timeline, masked recipient data, redacted JSON, normalized failure category, retryability, and suggested action ✓
 - Delivery records and delivery attempt tracking ✓
 - Idempotency key support ✓
 - Dashboard stats endpoint with real-time counts (enhanced with retry, dead-letter, WS, per-channel) ✓
+- Manual retry/resend controls are not yet implemented ❌
+- Dedicated notification export jobs are not yet implemented ❌
 
 ## Deliveries
 **Status: Complete**
@@ -155,6 +159,17 @@
 - Audit logging on create/revoke ✓
 - API key management UI with create/revoke ✓
 
+## Tenant Integration Guide
+**Status: Partial**
+
+- Tenant portal Integration page with tenant-aware setup status, API base URL, authentication guidance, checklist, copyable examples, rate limits, credential metadata, and recent delivery errors ✓
+- Platform-admin Tenant Detail Integration tab using the same tenant-scoped guide ✓
+- Backend integration summary endpoints with tenant isolation and no secret redisplay ✓
+- Explicit integration permissions and broad fallback to existing API-key/send permissions ✓
+- OpenAPI/Postman generation not implemented ❌
+- Full interactive request builder/test console not implemented ❌
+- Webhook configuration/signature guide remains roadmap because webhook delivery APIs are not implemented ❌
+
 ## Audit Logs
 **Status: Complete**
 
@@ -213,6 +228,7 @@
 
 - RabbitMQ client with durable queues ✓
 - Router, scheduler, email, SMS, FCM, WebSocket, retry, dead-letter queues ✓
+- Tenant/channel queue controls with deterministic names, portal pause/resume/stop operations, and worker-side enforcement ✓
 - JSON job serialization ✓
 - Persistent delivery mode ✓
 - Kafka queue driver not implemented (intentionally future work) ❌

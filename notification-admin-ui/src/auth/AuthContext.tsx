@@ -14,6 +14,8 @@ const GRANULAR_TO_BROAD: Record<string, string> = {
   'features.update': 'features.manage',
   'channels.view': 'channels.manage',
   'channels.update': 'channels.manage',
+  'queue_controls.view': 'channels.manage',
+  'queue_controls.update': 'channels.manage',
   'providers.view': 'providers.manage',
   'providers.create': 'providers.manage',
   'providers.update': 'providers.manage',
@@ -29,6 +31,9 @@ const GRANULAR_TO_BROAD: Record<string, string> = {
   'api_keys.view': 'api_keys.manage',
   'api_keys.create': 'api_keys.manage',
   'api_keys.revoke': 'api_keys.manage',
+  'integration.view': 'api_keys.view',
+  'integration.test': 'notifications.send',
+  'integration.view_api_docs': 'integration.view',
   'campaigns.view': 'campaigns.manage',
   'campaigns.create': 'campaigns.manage',
   'campaigns.update': 'campaigns.manage',
@@ -75,6 +80,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
+    const syncLogout = () => {
+      setToken(null);
+      setUser(null);
+    };
+    window.addEventListener('notification_admin_logout', syncLogout);
+    return () => window.removeEventListener('notification_admin_logout', syncLogout);
+  }, []);
+
+  useEffect(() => {
     if (!token) return;
     apiRequest<{ user: Principal }>('/admin/api/v1/auth/me')
       .then((res) => {
@@ -85,11 +99,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [token]);
 
   async function login(email: string, password: string) {
-    const res = await apiRequest<{ access_token: string; user: Principal }>('/admin/api/v1/auth/login', {
+    const res = await apiRequest<{ access_token: string; refresh_token: string; user: Principal }>('/admin/api/v1/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password })
     });
     localStorage.setItem('notification_admin_token', res.access_token);
+    localStorage.setItem('notification_admin_refresh_token', res.refresh_token);
     localStorage.setItem('notification_admin_user', JSON.stringify(res.user));
     setToken(res.access_token);
     setUser(res.user);
@@ -97,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   function logout() {
     localStorage.removeItem('notification_admin_token');
+    localStorage.removeItem('notification_admin_refresh_token');
     localStorage.removeItem('notification_admin_user');
     setToken(null);
     setUser(null);

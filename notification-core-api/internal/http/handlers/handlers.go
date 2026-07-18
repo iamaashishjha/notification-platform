@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"notification-core-api/internal/audit"
 	"notification-core-api/internal/auth"
+	"notification-core-api/internal/failures"
 	httpmw "notification-core-api/internal/http/middleware"
 	"notification-core-api/internal/notifications"
 	"notification-core-api/internal/providers"
@@ -182,17 +184,61 @@ func (h Handler) SendAdminNotification(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) ListNotificationLogs(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
-	if !p.IsPlatform {
-		h.listTenantNotificationLogs(w, r, p.TenantID)
-		return
-	}
-	rows, err := h.db.Query(r.Context(), `
-SELECT n.public_id, t.name, n.event_key, n.status,
-       COALESCE((SELECT d.status FROM notification_deliveries d WHERE d.notification_id = n.id ORDER BY d.updated_at DESC LIMIT 1), 'pending') AS delivery_status,
-       n.created_at
+	page, perPage, offset := pagination(r)
+	q := `
 FROM notifications n
 JOIN tenants t ON t.id = n.tenant_id
-ORDER BY n.created_at DESC LIMIT 100`)
+LEFT JOIN LATERAL (
+	SELECT d.status, d.channel, d.provider, d.updated_at, d.response_json
+	FROM notification_deliveries d
+	WHERE d.notification_id = n.id
+	ORDER BY d.updated_at DESC
+	LIMIT 1
+) d ON true`
+	where := []string{}
+	args := []any{}
+	add := func(condition string, value any) {
+		args = append(args, value)
+		where = append(where, condition+" $"+strconv.Itoa(len(args)))
+	}
+	if !p.IsPlatform {
+		add("n.tenant_id =", p.TenantID)
+	} else if tenantID := r.URL.Query().Get("tenant_id"); tenantID != "" {
+		add("n.tenant_id =", tenantID)
+	}
+	if search := strings.TrimSpace(r.URL.Query().Get("search")); search != "" {
+		args = append(args, "%"+strings.ToLower(search)+"%")
+		where = append(where, "(lower(n.public_id) LIKE $"+strconv.Itoa(len(args))+" OR lower(n.event_key) LIKE $"+strconv.Itoa(len(args))+" OR lower(COALESCE(n.idempotency_key,'')) LIKE $"+strconv.Itoa(len(args))+")")
+	}
+	if channel := strings.TrimSpace(r.URL.Query().Get("channel")); channel != "" {
+		add("d.channel =", channel)
+	}
+	if provider := strings.TrimSpace(r.URL.Query().Get("provider")); provider != "" {
+		add("d.provider =", provider)
+	}
+	if status := strings.TrimSpace(r.URL.Query().Get("status")); status != "" {
+		add("COALESCE(d.status,n.status) =", status)
+	}
+	if from := strings.TrimSpace(r.URL.Query().Get("from")); from != "" {
+		add("n.created_at >=", from)
+	}
+	if to := strings.TrimSpace(r.URL.Query().Get("to")); to != "" {
+		add("n.created_at <=", to)
+	}
+	if len(where) > 0 {
+		q += " WHERE " + strings.Join(where, " AND ")
+	}
+	var total int
+	if err := h.db.QueryRow(r.Context(), "SELECT COUNT(*) "+q, args...).Scan(&total); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "count failed"})
+		return
+	}
+	listArgs := append([]any{}, args...)
+	listArgs = append(listArgs, perPage, offset)
+	rows, err := h.db.Query(r.Context(), `
+SELECT n.public_id, n.tenant_id::text, t.name, n.event_key, n.status, COALESCE(d.status,'pending'),
+       COALESCE(d.channel,''), COALESCE(d.provider,''), n.idempotency_key, n.created_at, n.updated_at
+`+q+` ORDER BY n.created_at DESC LIMIT $`+strconv.Itoa(len(args)+1)+` OFFSET $`+strconv.Itoa(len(args)+2), listArgs...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
 		return
@@ -200,42 +246,68 @@ ORDER BY n.created_at DESC LIMIT 100`)
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var publicID, tenantName, event, status, deliveryStatus string
+		var publicID, tenantID, tenantName, event, status, deliveryStatus, channel, provider string
+		var idempotencyKey *string
 		var createdAt time.Time
-		if err := rows.Scan(&publicID, &tenantName, &event, &status, &deliveryStatus, &createdAt); err != nil {
+		var updatedAt time.Time
+		if err := rows.Scan(&publicID, &tenantID, &tenantName, &event, &status, &deliveryStatus, &channel, &provider, &idempotencyKey, &createdAt, &updatedAt); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 			return
 		}
-		items = append(items, map[string]any{"public_id": publicID, "tenant": tenantName, "event": event, "status": status, "delivery_status": deliveryStatus, "created_at": createdAt})
+		items = append(items, map[string]any{"public_id": publicID, "tenant_id": tenantID, "tenant": tenantName, "event": event, "status": status, "delivery_status": deliveryStatus, "channel": channel, "provider": provider, "idempotency_key": idempotencyKey, "created_at": createdAt, "updated_at": updatedAt})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeJSON(w, http.StatusOK, map[string]any{"data": items, "meta": paginationMeta(page, perPage, total)})
 }
 
-func (h Handler) listTenantNotificationLogs(w http.ResponseWriter, r *http.Request, tenantID string) {
-	rows, err := h.db.Query(r.Context(), `
-SELECT n.public_id, t.name, n.event_key, n.status,
-       COALESCE((SELECT d.status FROM notification_deliveries d WHERE d.notification_id = n.id ORDER BY d.updated_at DESC LIMIT 1), 'pending') AS delivery_status,
-       n.created_at
+func (h Handler) GetNotificationDetail(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	publicID := r.PathValue("public_id")
+	q := `
+SELECT n.id::text, n.tenant_id::text, t.name, n.public_id, n.event_key, COALESCE(n.template_key,''), n.target_type,
+       n.target_json, n.data_json, n.channels, n.priority, n.schedule_type, n.scheduled_at, n.status,
+       COALESCE(n.idempotency_key,''), n.created_at, n.updated_at
 FROM notifications n
 JOIN tenants t ON t.id = n.tenant_id
-WHERE n.tenant_id = $1
-ORDER BY n.created_at DESC LIMIT 100`, tenantID)
-	if err != nil {
+WHERE n.public_id = $1`
+	args := []any{publicID}
+	if !p.IsPlatform {
+		q += " AND n.tenant_id = $2"
+		args = append(args, p.TenantID)
+	}
+	var id, tenantID, tenantName, event, templateKey, targetType, status, idempotencyKey, scheduleType string
+	var targetRaw, dataRaw, channelsRaw []byte
+	var priority int
+	var scheduledAt *time.Time
+	var createdAt, updatedAt time.Time
+	if err := h.db.QueryRow(r.Context(), q, args...).Scan(&id, &tenantID, &tenantName, &publicID, &event, &templateKey, &targetType, &targetRaw, &dataRaw, &channelsRaw, &priority, &scheduleType, &scheduledAt, &status, &idempotencyKey, &createdAt, &updatedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "notification not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
 		return
 	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		var publicID, tenantName, event, status, deliveryStatus string
-		var createdAt time.Time
-		if err := rows.Scan(&publicID, &tenantName, &event, &status, &deliveryStatus, &createdAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
-			return
-		}
-		items = append(items, map[string]any{"public_id": publicID, "tenant": tenantName, "event": event, "status": status, "delivery_status": deliveryStatus, "created_at": createdAt})
+	deliveries, timeline, err := h.notificationDeliveries(r.Context(), id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "delivery query failed"})
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	timeline = append([]map[string]any{{
+		"type":        "created",
+		"timestamp":   createdAt,
+		"source":      "api",
+		"explanation": "Notification request accepted by the platform.",
+	}}, timeline...)
+	if scheduledAt != nil {
+		timeline = append(timeline, map[string]any{"type": "scheduled", "timestamp": scheduledAt, "source": "scheduler", "explanation": "Notification is scheduled for future queueing."})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+		"id": id, "tenant_id": tenantID, "tenant": tenantName, "public_id": publicID, "event": event,
+		"template_key": templateKey, "target_type": targetType, "target": maskRecipientJSON(targetRaw),
+		"data": json.RawMessage(security.RedactJSON(dataRaw)), "channels": json.RawMessage(channelsRaw), "priority": priority,
+		"schedule_type": scheduleType, "scheduled_at": scheduledAt, "status": status, "idempotency_key": idempotencyKey,
+		"created_at": createdAt, "updated_at": updatedAt, "deliveries": deliveries, "timeline": timeline,
+	}})
 }
 
 func (h Handler) ListTenants(w http.ResponseWriter, r *http.Request) {
@@ -246,7 +318,7 @@ func (h Handler) ListTenants(w http.ResponseWriter, r *http.Request) {
 		q += ` WHERE id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY created_at DESC LIMIT 100`
+	q += ` ORDER BY created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -338,10 +410,42 @@ func (h Handler) DashboardStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h Handler) GetMyIntegrationGuide(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	if p.TenantID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "tenant context required"})
+		return
+	}
+	h.writeIntegrationGuide(w, r, p.TenantID)
+}
+
+func (h Handler) GetTenantIntegrationGuide(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	tenantID := r.PathValue("id")
+	if !p.IsPlatform && p.TenantID != tenantID {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "access denied"})
+		return
+	}
+	h.writeIntegrationGuide(w, r, tenantID)
+}
+
+func (h Handler) writeIntegrationGuide(w http.ResponseWriter, r *http.Request, tenantID string) {
+	data, err := h.integrationGuideData(r.Context(), r, tenantID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "tenant not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "integration query failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
 func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	p, _ := httpmw.Principal(r.Context())
 	tenantFilter := r.URL.Query().Get("tenant_id")
-	q := `SELECT al.id::text, al.action, al.actor_type, COALESCE(al.actor_user_id::text,''), al.resource_type, COALESCE(al.resource_id::text,''), COALESCE(al.ip_address,''), COALESCE(al.request_id,''), COALESCE(al.session_id,''), al.created_at`
+	q := `SELECT al.id::text, COALESCE(al.tenant_id::text,''), al.action, al.actor_type, COALESCE(al.actor_user_id::text,''), al.resource_type, COALESCE(al.resource_id::text,''), COALESCE(al.ip_address,''), COALESCE(al.request_id,''), COALESCE(al.session_id,''), al.created_at`
 	args := []any{}
 	if p.IsPlatform {
 		q += `, COALESCE(t.name,'') AS tenant_name FROM audit_logs al LEFT JOIN tenants t ON t.id = al.tenant_id`
@@ -353,7 +457,7 @@ func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 		q += ` FROM audit_logs al WHERE al.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY al.created_at DESC LIMIT 100`
+	q += ` ORDER BY al.created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -362,21 +466,21 @@ func (h Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
-		var id, action, actorType, actorUserID, resourceType, resourceID, ipAddress, requestID, sessionID string
+		var id, tenantID, action, actorType, actorUserID, resourceType, resourceID, ipAddress, requestID, sessionID string
 		var createdAt time.Time
 		if p.IsPlatform {
 			var tenantName string
-			if err := rows.Scan(&id, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &requestID, &sessionID, &createdAt, &tenantName); err != nil {
+			if err := rows.Scan(&id, &tenantID, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &requestID, &sessionID, &createdAt, &tenantName); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "request_id": requestID, "session_id": sessionID, "created_at": createdAt, "tenant_name": tenantName})
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "request_id": requestID, "session_id": sessionID, "created_at": createdAt, "tenant_name": tenantName})
 		} else {
-			if err := rows.Scan(&id, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &requestID, &sessionID, &createdAt); err != nil {
+			if err := rows.Scan(&id, &tenantID, &action, &actorType, &actorUserID, &resourceType, &resourceID, &ipAddress, &requestID, &sessionID, &createdAt); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
 				return
 			}
-			items = append(items, map[string]any{"id": id, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "request_id": requestID, "session_id": sessionID, "created_at": createdAt})
+			items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "action": action, "actor_type": actorType, "actor_user_id": actorUserID, "resource_type": resourceType, "resource_id": resourceID, "ip_address": ipAddress, "request_id": requestID, "session_id": sessionID, "created_at": createdAt})
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
@@ -397,7 +501,7 @@ func (h Handler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 		q += ` FROM tenant_api_keys ak WHERE ak.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY ak.created_at DESC LIMIT 100`
+	q += ` ORDER BY ak.created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -526,12 +630,12 @@ func (h Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		if len(where) > 0 {
 			q += ` WHERE ` + strings.Join(where, ` AND `)
 		}
-		q += ` ORDER BY u.created_at DESC LIMIT 100`
+		q += ` ORDER BY u.created_at DESC`
 		rows, err = h.db.Query(r.Context(), q, args...)
 	} else {
 		rows, err = h.db.Query(r.Context(), `SELECT u.id::text, u.email, u.name, u.is_platform_admin, u.status, u.created_at,
 			COALESCE((SELECT STRING_AGG(DISTINCT r.name, ', ') FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id AND ur.tenant_id = tu.tenant_id), '') AS roles
-			FROM users u JOIN tenant_users tu ON tu.user_id = u.id WHERE tu.tenant_id = $1 ORDER BY u.created_at DESC LIMIT 100`, p.TenantID)
+			FROM users u JOIN tenant_users tu ON tu.user_id = u.id WHERE tu.tenant_id = $1 ORDER BY u.created_at DESC`, p.TenantID)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -621,6 +725,116 @@ func (h Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		items = append(items, map[string]any{"id": id, "channel": channel, "enabled": enabled, "direction": direction, "rate_limit_per_second": rateLimit, "daily_quota": dailyQuota, "tenant_name": tenantName})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (h Handler) ListQueueControls(w http.ResponseWriter, r *http.Request) {
+	p, _ := httpmw.Principal(r.Context())
+	tenantFilter := r.URL.Query().Get("tenant_id")
+	_, _ = h.db.Exec(r.Context(), `
+INSERT INTO tenant_queue_controls (tenant_id, channel, queue_name)
+SELECT tc.tenant_id, tc.channel, 'tenant.' || regexp_replace(lower(t.slug), '[^a-z0-9]+', '-', 'g') || '.' || tc.channel
+FROM tenant_channels tc
+JOIN tenants t ON t.id = tc.tenant_id
+ON CONFLICT (tenant_id, channel) DO NOTHING`)
+	q := `
+SELECT tqc.id::text, tqc.tenant_id::text, COALESCE(t.name,''), tqc.channel, tqc.queue_name, tqc.status, tqc.max_attempts, tqc.retry_delay_seconds, tqc.notes, tqc.updated_at
+FROM tenant_queue_controls tqc
+JOIN tenants t ON t.id = tqc.tenant_id`
+	args := []any{}
+	if p.IsPlatform {
+		if tenantFilter != "" {
+			q += ` WHERE tqc.tenant_id = $1`
+			args = append(args, tenantFilter)
+		}
+	} else {
+		q += ` WHERE tqc.tenant_id = $1`
+		args = append(args, p.TenantID)
+	}
+	q += ` ORDER BY t.name, tqc.channel`
+	rows, err := h.db.Query(r.Context(), q, args...)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
+		return
+	}
+	defer rows.Close()
+	items := []map[string]any{}
+	for rows.Next() {
+		var id, tenantID, tenantName, channel, queueName, status, notes string
+		var maxAttempts, retryDelaySeconds int
+		var updatedAt time.Time
+		if err := rows.Scan(&id, &tenantID, &tenantName, &channel, &queueName, &status, &maxAttempts, &retryDelaySeconds, &notes, &updatedAt); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "scan failed"})
+			return
+		}
+		items = append(items, map[string]any{"id": id, "tenant_id": tenantID, "tenant_name": tenantName, "channel": channel, "queue_name": queueName, "status": status, "max_attempts": maxAttempts, "retry_delay_seconds": retryDelaySeconds, "notes": notes, "updated_at": updatedAt})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+}
+
+func (h Handler) UpdateQueueControl(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Status            *string `json:"status"`
+		MaxAttempts       *int    `json:"max_attempts"`
+		RetryDelaySeconds *int    `json:"retry_delay_seconds"`
+		Notes             *string `json:"notes"`
+	}
+	if decode(w, r, &req) != nil {
+		return
+	}
+	p, _ := httpmw.Principal(r.Context())
+	var tenantID string
+	if err := h.db.QueryRow(r.Context(), `SELECT tenant_id::text FROM tenant_queue_controls WHERE id = $1`, id).Scan(&tenantID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "queue control not found"})
+		return
+	}
+	if !p.IsPlatform && tenantID != p.TenantID {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
+		return
+	}
+	q := `UPDATE tenant_queue_controls SET updated_at = now(), updated_by = $1`
+	args := []any{nullIfEmpty(p.UserID)}
+	argN := 2
+	if req.Status != nil {
+		if *req.Status != "active" && *req.Status != "paused" && *req.Status != "stopped" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid status"})
+			return
+		}
+		q += ", status = $" + itoa(argN)
+		args = append(args, *req.Status)
+		argN++
+	}
+	if req.MaxAttempts != nil {
+		if *req.MaxAttempts < 1 || *req.MaxAttempts > 20 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "max_attempts must be between 1 and 20"})
+			return
+		}
+		q += ", max_attempts = $" + itoa(argN)
+		args = append(args, *req.MaxAttempts)
+		argN++
+	}
+	if req.RetryDelaySeconds != nil {
+		if *req.RetryDelaySeconds < 0 || *req.RetryDelaySeconds > 86400 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "retry_delay_seconds must be between 0 and 86400"})
+			return
+		}
+		q += ", retry_delay_seconds = $" + itoa(argN)
+		args = append(args, *req.RetryDelaySeconds)
+		argN++
+	}
+	if req.Notes != nil {
+		q += ", notes = $" + itoa(argN)
+		args = append(args, *req.Notes)
+		argN++
+	}
+	q += " WHERE id = $" + itoa(argN)
+	args = append(args, id)
+	if _, err := h.db.Exec(r.Context(), q, args...); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "update failed"})
+		return
+	}
+	_ = h.audit.Write(r.Context(), audit.Event{TenantID: tenantID, ActorUserID: p.UserID, ActorType: "tenant_user", Action: "queue_control.update", ResourceType: "tenant_queue_control", ResourceID: id})
+	writeJSON(w, http.StatusOK, map[string]any{"message": "queue control updated"})
 }
 
 func (h Handler) ListProviderConfigs(w http.ResponseWriter, r *http.Request) {
@@ -964,7 +1178,7 @@ func (h Handler) CreateProviderConfig(w http.ResponseWriter, r *http.Request) {
 	if configRaw == "" {
 		configRaw = "{}"
 	}
-	encrypted, err := security.Encrypt(configRaw)
+	encrypted, err := encryptedProviderConfigJSON(configRaw)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "encryption failed"})
 		return
@@ -1009,7 +1223,7 @@ func (h Handler) UpdateProviderConfig(w http.ResponseWriter, r *http.Request) {
 		argN++
 	}
 	if req.ConfigJSON != "" {
-		encrypted, err := security.Encrypt(req.ConfigJSON)
+		encrypted, err := encryptedProviderConfigJSON(req.ConfigJSON)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "encryption failed"})
 			return
@@ -1075,7 +1289,7 @@ func (h Handler) TestProviderConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "provider config not found"})
 		return
 	}
-	decrypted, err := security.Decrypt(configRaw)
+	decrypted, err := decryptProviderConfigJSON(configRaw)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "decryption failed"})
 		return
@@ -1148,7 +1362,7 @@ func (h Handler) ListInAppNotifications(w http.ResponseWriter, r *http.Request) 
 		q += ` AND status = $2`
 		args = append(args, status)
 	}
-	q += ` ORDER BY created_at DESC LIMIT 100`
+	q += ` ORDER BY created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -1959,6 +2173,315 @@ func (h Handler) UpdateProviderType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"message": "provider type updated"})
+}
+
+func (h Handler) notificationDeliveries(ctx context.Context, notificationID string) ([]map[string]any, []map[string]any, error) {
+	rows, err := h.db.Query(ctx, `
+SELECT id::text, channel, provider, recipient_json, status, scheduled_at, delivered_at, COALESCE(provider_message_id,''), response_json, created_at, updated_at
+FROM notification_deliveries
+WHERE notification_id = $1
+ORDER BY created_at ASC`, notificationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	deliveries := []map[string]any{}
+	timeline := []map[string]any{}
+	for rows.Next() {
+		var id, channel, provider, status, providerMessageID string
+		var recipientRaw, responseRaw []byte
+		var scheduledAt, deliveredAt *time.Time
+		var createdAt, updatedAt time.Time
+		if err := rows.Scan(&id, &channel, &provider, &recipientRaw, &status, &scheduledAt, &deliveredAt, &providerMessageID, &responseRaw, &createdAt, &updatedAt); err != nil {
+			return nil, nil, err
+		}
+		classification := failures.Normalize(status, providerMessageID, string(responseRaw))
+		attempts, attemptTimeline, err := h.deliveryAttempts(ctx, id, channel, provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		deliveries = append(deliveries, map[string]any{
+			"id": id, "channel": channel, "provider": provider, "recipient": maskRecipientJSON(recipientRaw),
+			"status": status, "scheduled_at": scheduledAt, "delivered_at": deliveredAt, "provider_message_id": providerMessageID,
+			"response": json.RawMessage(security.RedactJSON(responseRaw)), "failure": classification, "attempts": attempts,
+			"created_at": createdAt, "updated_at": updatedAt,
+		})
+		timeline = append(timeline, map[string]any{"type": "queued", "timestamp": createdAt, "channel": channel, "provider": provider, "source": "queue", "explanation": "Delivery was queued for worker processing."})
+		timeline = append(timeline, attemptTimeline...)
+		if deliveredAt != nil {
+			timeline = append(timeline, map[string]any{"type": "delivered", "timestamp": deliveredAt, "channel": channel, "provider": provider, "source": "provider", "explanation": "Provider send completed successfully."})
+		}
+		if status == "dead" {
+			timeline = append(timeline, map[string]any{"type": "moved_to_dead_letter", "timestamp": updatedAt, "channel": channel, "provider": provider, "source": "retry_worker", "failure": classification, "explanation": classification.Explanation})
+		}
+	}
+	return deliveries, timeline, rows.Err()
+}
+
+func (h Handler) integrationGuideData(ctx context.Context, r *http.Request, tenantID string) (map[string]any, error) {
+	var tenantName, tenantSlug, tenantStatus string
+	if err := h.db.QueryRow(ctx, `SELECT name, slug, status FROM tenants WHERE id = $1`, tenantID).Scan(&tenantName, &tenantSlug, &tenantStatus); err != nil {
+		return nil, err
+	}
+
+	channels := []map[string]any{}
+	channelRows, err := h.db.Query(ctx, `SELECT channel, enabled, direction, rate_limit_per_second, daily_quota FROM tenant_channels WHERE tenant_id = $1 ORDER BY channel`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer channelRows.Close()
+	totalRateLimit := 0
+	totalDailyQuota := 0
+	enabledChannels := 0
+	for channelRows.Next() {
+		var channel, direction string
+		var enabled bool
+		var rateLimit, dailyQuota int
+		if err := channelRows.Scan(&channel, &enabled, &direction, &rateLimit, &dailyQuota); err != nil {
+			return nil, err
+		}
+		if enabled {
+			enabledChannels++
+			totalRateLimit += rateLimit
+			totalDailyQuota += dailyQuota
+		}
+		channels = append(channels, map[string]any{"channel": channel, "enabled": enabled, "direction": direction, "rate_limit_per_second": rateLimit, "daily_quota": dailyQuota})
+	}
+
+	credentials := []map[string]any{}
+	keyRows, err := h.db.Query(ctx, `SELECT id::text, name, COALESCE(scopes_json::text,'[]'), status, COALESCE(last_used_at::text,''), COALESCE(expires_at::text,''), created_at::text FROM tenant_api_keys WHERE tenant_id = $1 ORDER BY created_at DESC`, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer keyRows.Close()
+	activeCredentials := 0
+	lastAPIRequest := ""
+	for keyRows.Next() {
+		var id, name, scopes, status, lastUsed, expiresAt, createdAt string
+		if err := keyRows.Scan(&id, &name, &scopes, &status, &lastUsed, &expiresAt, &createdAt); err != nil {
+			return nil, err
+		}
+		if status == "active" {
+			activeCredentials++
+		}
+		if lastAPIRequest == "" && lastUsed != "" {
+			lastAPIRequest = lastUsed
+		}
+		credentials = append(credentials, map[string]any{"id": id, "name": name, "scopes": scopes, "status": status, "last_used_at": lastUsed, "expires_at": expiresAt, "created_at": createdAt})
+	}
+
+	var providerCount, activeProviderCount, templateCount, notificationCount, deliveredCount, failedCount int
+	_ = h.db.QueryRow(ctx, `SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'active') FROM tenant_provider_configs WHERE tenant_id = $1`, tenantID).Scan(&providerCount, &activeProviderCount)
+	_ = h.db.QueryRow(ctx, `SELECT COUNT(*) FROM notification_templates WHERE tenant_id = $1 AND status = 'active'`, tenantID).Scan(&templateCount)
+	_ = h.db.QueryRow(ctx, `SELECT COUNT(*) FROM notifications WHERE tenant_id = $1`, tenantID).Scan(&notificationCount)
+	_ = h.db.QueryRow(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE tenant_id = $1 AND status = 'sent'`, tenantID).Scan(&deliveredCount)
+	_ = h.db.QueryRow(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE tenant_id = $1 AND status IN ('failed','dead','blocked')`, tenantID).Scan(&failedCount)
+
+	lastQueued := ""
+	lastDelivered := ""
+	_ = h.db.QueryRow(ctx, `SELECT COALESCE(MAX(created_at)::text,'') FROM notifications WHERE tenant_id = $1`, tenantID).Scan(&lastQueued)
+	_ = h.db.QueryRow(ctx, `SELECT COALESCE(MAX(delivered_at)::text,'') FROM notification_deliveries WHERE tenant_id = $1 AND delivered_at IS NOT NULL`, tenantID).Scan(&lastDelivered)
+
+	recentErrors := []map[string]any{}
+	errorRows, err := h.db.Query(ctx, `
+SELECT n.public_id, d.channel, d.provider, d.status, COALESCE(d.provider_message_id,''), d.response_json, d.updated_at
+FROM notification_deliveries d
+JOIN notifications n ON n.id = d.notification_id
+WHERE d.tenant_id = $1 AND d.status IN ('failed','dead','blocked')
+ORDER BY d.updated_at DESC
+LIMIT 5`, tenantID)
+	if err == nil {
+		defer errorRows.Close()
+		for errorRows.Next() {
+			var publicID, channel, provider, status, providerMessageID string
+			var responseRaw []byte
+			var updatedAt time.Time
+			if errorRows.Scan(&publicID, &channel, &provider, &status, &providerMessageID, &responseRaw, &updatedAt) == nil {
+				classification := failures.Normalize(status, providerMessageID, string(responseRaw))
+				recentErrors = append(recentErrors, map[string]any{"notification_id": publicID, "channel": channel, "provider": provider, "status": status, "failure": classification, "updated_at": updatedAt})
+			}
+		}
+	}
+
+	checklist := []map[string]any{
+		integrationStep("tenant_active", "Tenant activated", tenantStatus == "active", "Sending requires an active tenant.", "/settings"),
+		integrationStep("credential_created", "API credential created", activeCredentials > 0, "Server-to-server requests require a tenant API key.", "/api-keys"),
+		integrationStep("api_auth_tested", "API authentication tested", lastAPIRequest != "", "A successful authenticated API request proves the key and environment are correct.", "/api-keys"),
+		integrationStep("channel_enabled", "Delivery channel enabled", enabledChannels > 0, "At least one enabled channel is required before sending.", "/channels"),
+		integrationStep("provider_configured", "Provider configured", activeProviderCount > 0, "Active providers are required for delivery workers to send messages.", "/providers"),
+		integrationStep("template_available", "Template available", templateCount > 0, "Templates keep payloads consistent across integration clients.", "/templates"),
+		integrationStep("first_notification_queued", "First notification queued", notificationCount > 0, "Queued notifications confirm the submit API contract is working.", "/notifications"),
+		integrationStep("first_notification_delivered", "First notification delivered", deliveredCount > 0, "Delivery confirms provider configuration and recipient data are valid.", "/notifications"),
+	}
+	completed := 0
+	for _, step := range checklist {
+		if done, ok := step["complete"].(bool); ok && done {
+			completed++
+		}
+	}
+	completion := 0
+	if len(checklist) > 0 {
+		completion = completed * 100 / len(checklist)
+	}
+
+	status := "setup_incomplete"
+	recommended := "Create an API credential and send a test notification."
+	if tenantStatus != "active" {
+		status = "blocked"
+		recommended = "Activate the tenant before attempting integration."
+	} else if activeCredentials == 0 {
+		recommended = "Create an API key in the credentials page."
+	} else if enabledChannels == 0 {
+		recommended = "Enable at least one delivery channel."
+	} else if activeProviderCount == 0 {
+		recommended = "Configure or enable a provider for an enabled channel."
+	} else if failedCount > 0 && deliveredCount == 0 {
+		status = "degraded"
+		recommended = "Open Notification Logs and inspect the latest failed delivery."
+	} else if completion >= 75 {
+		status = "healthy"
+		recommended = "Review production rate limits and secure credential rotation."
+	}
+
+	baseURL := publicBaseURL(r)
+	return map[string]any{
+		"tenant":         map[string]any{"id": tenantID, "name": tenantName, "slug": tenantSlug, "status": tenantStatus},
+		"environment":    map[string]any{"name": "local", "api_base_url": baseURL + "/api/v1", "admin_base_url": baseURL + "/admin/api/v1", "api_version": "v1"},
+		"authentication": map[string]any{"method": "tenant_api_key", "header": "Authorization: Bearer YOUR_API_KEY", "secret_display": "one_time_only"},
+		"summary":        map[string]any{"status": status, "completion_percent": completion, "active_credentials": activeCredentials, "enabled_channels": enabledChannels, "active_providers": activeProviderCount, "active_templates": templateCount, "rate_limit_per_second": totalRateLimit, "daily_quota": totalDailyQuota, "last_successful_api_request": lastAPIRequest, "last_successful_notification": lastDelivered, "last_notification_queued": lastQueued, "webhook_status": "not_configured", "recommended_next_action": recommended},
+		"checklist":      checklist,
+		"channels":       channels,
+		"credentials":    credentials,
+		"recent_errors":  recentErrors,
+		"docs": map[string]any{"tenant_facing_endpoints": []map[string]any{
+			{"method": "POST", "path": "/api/v1/notifications", "scope": "notifications:create", "purpose": "Submit an instant or scheduled notification request."},
+		}},
+	}, nil
+}
+
+func integrationStep(id, label string, complete bool, description string, actionPath string) map[string]any {
+	status := "pending"
+	if complete {
+		status = "complete"
+	}
+	return map[string]any{"id": id, "label": label, "status": status, "complete": complete, "description": description, "why_it_matters": description, "action_path": actionPath}
+}
+
+func publicBaseURL(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	host := r.Host
+	if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" {
+		host = forwarded
+	}
+	return scheme + "://" + host
+}
+
+func encryptedProviderConfigJSON(raw string) (string, error) {
+	encrypted, err := security.Encrypt(raw)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(encrypted)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func decryptProviderConfigJSON(raw string) (string, error) {
+	var encrypted string
+	if err := json.Unmarshal([]byte(raw), &encrypted); err == nil {
+		return security.Decrypt(encrypted)
+	}
+	return security.Decrypt(raw)
+}
+
+func (h Handler) deliveryAttempts(ctx context.Context, deliveryID, channel, provider string) ([]map[string]any, []map[string]any, error) {
+	rows, err := h.db.Query(ctx, `
+SELECT attempt_no, status, COALESCE(error,''), response_json, duration_ms, created_at
+FROM delivery_attempts
+WHERE delivery_id = $1
+ORDER BY attempt_no ASC, created_at ASC`, deliveryID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	attempts := []map[string]any{}
+	timeline := []map[string]any{}
+	for rows.Next() {
+		var attemptNo, durationMS int
+		var status, errText string
+		var responseRaw []byte
+		var createdAt time.Time
+		if err := rows.Scan(&attemptNo, &status, &errText, &responseRaw, &durationMS, &createdAt); err != nil {
+			return nil, nil, err
+		}
+		classification := failures.Normalize(status, "", errText+" "+string(responseRaw))
+		attempt := map[string]any{"attempt_no": attemptNo, "status": status, "error": errText, "response": json.RawMessage(security.RedactJSON(responseRaw)), "duration_ms": durationMS, "created_at": createdAt, "failure": classification}
+		attempts = append(attempts, attempt)
+		eventType := "provider_accepted"
+		explanation := "Provider accepted the delivery request."
+		if status != "sent" {
+			eventType = "failed"
+			explanation = classification.Explanation
+		}
+		timeline = append(timeline, map[string]any{"type": eventType, "timestamp": createdAt, "channel": channel, "provider": provider, "attempt_no": attemptNo, "duration_ms": durationMS, "source": "worker", "failure": classification, "explanation": explanation})
+	}
+	return attempts, timeline, rows.Err()
+}
+
+func maskRecipientJSON(raw []byte) map[string]any {
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return map[string]any{"redacted": true}
+	}
+	if target, ok := object["recipient"].(map[string]any); ok {
+		object["recipient"] = maskRecipientMap(target)
+		return object
+	}
+	return maskRecipientMap(object)
+}
+
+func maskRecipientMap(input map[string]any) map[string]any {
+	out := security.RedactMap(input)
+	if value, ok := out["email"].(string); ok && value != "" {
+		out["email"] = security.RedactEmail(value)
+	}
+	if value, ok := out["phone"].(string); ok && value != "" {
+		out["phone"] = security.RedactPhone(value)
+	}
+	for _, key := range []string{"fcm_token", "push_token", "device_token"} {
+		if value, ok := out[key].(string); ok && value != "" {
+			out[key] = security.MaskToken(value)
+		}
+	}
+	return out
+}
+
+func pagination(r *http.Request) (int, int, int) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		perPage = 100
+	}
+	return page, perPage, (page - 1) * perPage
+}
+
+func paginationMeta(page, perPage, total int) map[string]any {
+	totalPages := 0
+	if total > 0 {
+		totalPages = (total + perPage - 1) / perPage
+	}
+	return map[string]any{"page": page, "per_page": perPage, "total": total, "total_pages": totalPages}
 }
 
 func bcryptHash(password string) (string, error) {

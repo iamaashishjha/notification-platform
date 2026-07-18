@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react';
-import { apiRequest, list } from '../../api/client';
+import { apiRequest, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { Button } from '../../components/Button';
+import { TablePagination } from '../../components/TablePagination';
+import { StatusToggle } from '../../components/StatusToggle';
+import { FilterToolbar, SearchControl, SelectFilter } from '../../components/ListFilters';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { Bell, CheckCircle2, Info, XCircle } from 'lucide-react';
+import { Bell, Info, X } from 'lucide-react';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type ChannelCatalogItem = {
   channel: string;
@@ -12,16 +18,6 @@ type ChannelCatalogItem = {
   tenant_count: number;
   enabled: boolean;
 };
-
-function StatusToggle({ value, label, disabled, onToggle }: { value: boolean; label: string; disabled?: boolean; onToggle: () => void }) {
-  return (
-    <button type="button" role="switch" aria-checked={value} aria-label={label} disabled={disabled} onClick={onToggle} className={`focus-ring inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-medium disabled:opacity-60 ${value ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-      {value ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-      <span>{value ? 'Enabled' : 'Disabled'}</span>
-      <span className={`relative h-4 w-7 rounded-full transition ${value ? 'bg-emerald-500' : 'bg-slate-300'}`}><span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${value ? 'left-[14px]' : 'left-0.5'}`} /></span>
-    </button>
-  );
-}
 
 const CHANNEL_MODES: Record<string, string> = {
   'email': 'one_way/two_way',
@@ -40,6 +36,10 @@ export function ChannelsPage() {
   const [items, setItems] = useState<ChannelCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState('');
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const { page, perPage, setPage, setPerPage } = usePagination([search, statusFilter]);
 
   async function toggle(item: ChannelCatalogItem) {
     setSaving(item.channel);
@@ -50,11 +50,11 @@ export function ChannelsPage() {
 
   useEffect(() => {
     setLoading(true);
-    list<ChannelCatalogItem>('/admin/api/v1/channel-catalog')
-      .then((res) => setItems(res.data))
+    listPage<ChannelCatalogItem>('/admin/api/v1/channel-catalog', { q: search, filter_enabled: statusFilter, page, per_page: perPage })
+      .then((res) => { setItems(res.data); setMeta(res.meta); })
       .catch((err) => toast.error('Unable to load channel catalog', err instanceof Error ? err.message : 'Load failed'))
       .finally(() => setLoading(false));
-  }, [toast]);
+  }, [toast, search, statusFilter, page, perPage]);
 
   return (
     <Panel title="Channel Catalog">
@@ -66,6 +66,15 @@ export function ChannelsPage() {
         </div>
       </div>
       <div className="mb-6 flex items-start gap-3 border-b border-slate-200 pb-5"><Bell size={18} className="mt-0.5 text-blue-600"/><div><div className="text-sm font-semibold text-slate-900">Platform delivery controls</div><p className="mt-0.5 text-sm leading-6 text-slate-600">Globally enable or disable delivery channels. A disabled channel is unavailable to every tenant, regardless of its tenant-level setting.</p></div></div>
+      <FilterToolbar>
+        <SearchControl id="channel-search" label="Search channels" value={search} onChange={setSearch} placeholder="Channel, mode, or purpose" />
+        <SelectFilter id="channel-status" label="Status" value={statusFilter} onChange={setStatusFilter}>
+          <option value="">All statuses</option>
+          <option value="true">Enabled</option>
+          <option value="false">Disabled</option>
+        </SelectFilter>
+        {(search || statusFilter) && <Button size="sm" icon={X} onClick={() => { setSearch(''); setStatusFilter(''); }} className="template-clear-filters">Clear filters</Button>}
+      </FilterToolbar>
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
@@ -108,6 +117,7 @@ export function ChannelsPage() {
         </table>
         </div>
       )}
+      {!loading && <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />}
       {confirmDialog}
     </Panel>
   );

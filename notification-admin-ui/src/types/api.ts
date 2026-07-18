@@ -8,4 +8,12 @@ export type Principal = {
 
 export type ApiList<T> = {
   data: T[];
+  meta?: PaginationMeta;
+};
+
+export type PaginationMeta = {
+  page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
 };

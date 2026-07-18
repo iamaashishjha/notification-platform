@@ -35,11 +35,13 @@ perms AS (
         -- Features (broad + granular)
         ('features.manage'), ('features.view'), ('features.update'),
         -- Channels (broad + granular)
-        ('channels.manage'), ('channels.view'), ('channels.update'),
+        ('channels.manage'), ('channels.view'), ('channels.update'), ('queue_controls.view'), ('queue_controls.update'),
         -- Providers (broad + granular)
         ('providers.manage'), ('providers.view'), ('providers.create'), ('providers.update'), ('providers.delete'), ('providers.test'),
         -- API keys (broad + granular)
         ('api_keys.manage'), ('api_keys.view'), ('api_keys.create'), ('api_keys.revoke'),
+        -- Integration guide and tenant developer docs
+        ('integration.view'), ('integration.test'), ('integration.view_api_docs'),
         -- Contacts (broad + granular)
         ('contacts.view'), ('contacts.manage'), ('contacts.create'), ('contacts.update'), ('contacts.delete'),
         -- Groups (broad + granular)
@@ -87,13 +89,13 @@ JOIN permissions p ON
         'roles.manage','permissions.manage',
         'features.view','features.update','channels.view','channels.update',
         'providers.view','providers.create','providers.update','providers.test',
-        'api_keys.view','audit_logs.view',
+        'api_keys.view','integration.view','integration.test','integration.view_api_docs','audit_logs.view',
         'notifications.view','notifications.send','notifications.retry','notifications.cancel',
         'campaigns.view','campaigns.approve','campaigns.send','campaigns.cancel',
         'settings.view','settings.update'
     ]))
     OR (r.key = 'platform_support' AND (
-        p.key IN ('notifications.view','notifications.send','providers.view','providers.test','audit_logs.view','settings.view')
+        p.key IN ('notifications.view','notifications.send','providers.view','providers.test','integration.view','integration.view_api_docs','audit_logs.view','settings.view')
         OR p.key LIKE '%.view'
     ))
     OR (r.key = 'tenant_admin' AND p.key = ANY(ARRAY[
@@ -101,7 +103,7 @@ JOIN permissions p ON
         'roles.manage','permissions.manage',
         'features.view','features.update','channels.view','channels.update',
         'providers.view','providers.create','providers.update','providers.delete','providers.test',
-        'api_keys.view','api_keys.create','api_keys.revoke',
+        'api_keys.view','api_keys.create','api_keys.revoke','integration.view','integration.test','integration.view_api_docs',
         'contacts.view','contacts.create','contacts.update','contacts.delete','contacts.manage',
         'groups.view','groups.create','groups.update','groups.delete','groups.members.manage','groups.manage',
         'templates.view','templates.create','templates.update','templates.delete','templates.manage',
@@ -114,14 +116,14 @@ JOIN permissions p ON
         'groups.view','groups.create','groups.update','groups.members.manage','groups.manage',
         'templates.view','templates.create','templates.update','templates.manage',
         'notifications.view','notifications.create','notifications.send','notifications.bulk_send',
-        'campaigns.view','campaigns.create','campaigns.update','campaigns.schedule',
+        'campaigns.view','campaigns.create','campaigns.update','campaigns.schedule','integration.view','integration.test','integration.view_api_docs',
         'settings.view'
     ]))
     OR (r.key = 'tenant_support' AND p.key = ANY(ARRAY[
-        'contacts.view','groups.view','templates.view','notifications.view','notifications.send','campaigns.view','audit_logs.view','settings.view'
+        'contacts.view','groups.view','templates.view','notifications.view','notifications.send','campaigns.view','integration.view','integration.view_api_docs','audit_logs.view','settings.view'
     ]))
     OR (r.key = 'tenant_viewer' AND (
-        p.key IN ('audit_logs.view','settings.view')
+        p.key IN ('audit_logs.view','settings.view','integration.view','integration.view_api_docs')
         OR p.key LIKE '%.view'
     ))
 WHERE r.tenant_id IS NULL

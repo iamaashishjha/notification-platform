@@ -1,7 +1,6 @@
-import { Bell, Building2, KeyRound, LayoutDashboard, LogOut, Megaphone, Send, Settings, Shield, UserRoundCog, Users, BookOpen, FileText, Sliders, MessageSquare } from 'lucide-react';
+import { Bell, Building2, Code2, KeyRound, LayoutDashboard, ListRestart, LogOut, Megaphone, Send, Settings, Shield, UserRoundCog, Users, BookOpen, FileText, Sliders, MessageSquare } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { DataTableEnhancer } from '../components/DataTableEnhancer';
 import { Button } from '../components/Button';
 
 const platformNav = [
@@ -28,6 +27,7 @@ const platformNav = [
     { to: '/audit-logs', label: 'Audit', icon: BookOpen, permission: 'audit_logs.view' },
   ]},
   { section: 'System', items: [
+    { to: '/queues', label: 'Queues', icon: ListRestart, permission: 'queue_controls.view' },
     { to: '/settings', label: 'Settings', icon: Settings, permission: 'settings.view' },
   ]},
 ];
@@ -50,9 +50,12 @@ const tenantNav = [
   ]},
   { section: 'Access', items: [
     { to: '/api-keys', label: 'API Keys', icon: KeyRound, permission: 'api_keys.view' },
+    { to: '/integration', label: 'Integration', icon: Code2, permission: 'integration.view' },
     { to: '/audit-logs', label: 'Audit', icon: BookOpen, permission: 'audit_logs.view' },
   ]},
   { section: 'Configuration', items: [
+    { to: '/providers', label: 'Providers', icon: Settings, permission: 'providers.view' },
+    { to: '/queues', label: 'Queues', icon: ListRestart, permission: 'queue_controls.view' },
     { to: '/settings', label: 'Settings', icon: Settings, permission: 'settings.view' },
   ]},
 ];
@@ -95,7 +98,6 @@ export function AppLayout() {
           <Button onClick={logout} icon={LogOut}>Logout</Button>
         </header>
         <main className="p-6">
-          <DataTableEnhancer />
           <Outlet />
         </main>
       </div>

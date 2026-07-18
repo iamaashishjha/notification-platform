@@ -26,7 +26,7 @@ func (h Handler) ListContacts(w http.ResponseWriter, r *http.Request) {
 		q += ` FROM contacts c WHERE c.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY c.created_at DESC LIMIT 100`
+	q += ` ORDER BY c.created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -189,7 +189,7 @@ func (h Handler) ListGroups(w http.ResponseWriter, r *http.Request) {
 		q += ` FROM contact_groups cg WHERE cg.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY cg.created_at DESC LIMIT 100`
+	q += ` ORDER BY cg.created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -298,7 +298,7 @@ func (h Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		q += ` FROM notification_templates nt WHERE nt.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY nt.created_at DESC LIMIT 100`
+	q += ` ORDER BY nt.created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})
@@ -449,7 +449,7 @@ func (h Handler) ListCampaigns(w http.ResponseWriter, r *http.Request) {
 		q += ` FROM campaigns c WHERE c.tenant_id = $1`
 		args = append(args, p.TenantID)
 	}
-	q += ` ORDER BY c.created_at DESC LIMIT 100`
+	q += ` ORDER BY c.created_at DESC`
 	rows, err := h.db.Query(r.Context(), q, args...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "query failed"})

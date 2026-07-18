@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { apiRequest, getErrorMessage, list } from '../../api/client';
+import { apiRequest, getErrorMessage, list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { StatusBadge } from '../../components/StatusBadge';
 import { Modal, ModalButton } from '../../components/Modal';
 import { useToast } from '../../components/Toast';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { Activity, Bell, CheckCircle2, Eye, FileText, Info, KeyRound, Layers3, LayoutDashboard, Megaphone, Plug, ScrollText, Users, UserRound, XCircle } from 'lucide-react';
+import { Activity, Bell, CheckCircle2, Code2, Eye, FileText, Info, KeyRound, Layers3, LayoutDashboard, Megaphone, Plug, ScrollText, Users, UserRound, XCircle } from 'lucide-react';
+import { IntegrationGuide } from '../integration/IntegrationGuide';
 
 type Tenant = { id: string; name: string; slug: string; status: string; created_at: string; updated_at: string };
 type Feature = { id: string; identifier: string; feature_key: string; name: string; description: string; category: string; enabled: boolean; created_at: string };
@@ -18,7 +19,7 @@ type Group = { id: string; name: string; description: string; member_count: numb
 type Template = { id: string; template_key: string; channel: string; subject: string; body?: string; status: string };
 type Campaign = { id: string; name: string; status: string; scheduled_at: string; created_at: string };
 type ApiKey = { id: string; name: string; status: string; last_used_at: string; created_at: string };
-type AuditLog = { id: string; action: string; actor_type: string; resource_type: string; created_at: string };
+type AuditLog = { id: string; tenant_id?: string; action: string; actor_type: string; actor_user_id?: string; resource_type: string; resource_id?: string; ip_address?: string; request_id?: string; session_id?: string; created_at: string; tenant_name?: string };
 type PreviewMode = 'text' | 'markdown' | 'html';
 type Overview = {
   tenant: Tenant;
@@ -225,6 +226,32 @@ function GenericTable({ columns, rows }: { columns: { key: string; label: string
   );
 }
 
+function TenantAuditTable({ rows, onViewSession }: { rows: AuditLog[]; onViewSession: (sessionID: string) => void }) {
+  if (rows.length === 0) return <p className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">No audit logs</p>;
+  const grouped = rows.reduce<Record<string, AuditLog[]>>((acc, row) => {
+    const key = row.session_id || 'No session';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(row);
+    return acc;
+  }, {});
+  return (
+    <div className="space-y-4">
+      {Object.entries(grouped).map(([sessionID, logs]) => (
+        <section key={sessionID} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <div><h3 className="text-sm font-semibold text-slate-900">Session</h3><p className="font-mono text-xs text-slate-500">{sessionID}</p></div>
+            <button type="button" onClick={() => onViewSession(sessionID)} className="focus-ring rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-600 shadow-sm hover:bg-blue-50">{logs.length} events</button>
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-slate-200 text-slate-500"><tr><th className="px-4 py-2">Action</th><th>Actor</th><th>Resource</th><th>Time</th><th>Actions</th></tr></thead>
+            <tbody>{logs.map((item) => <tr key={item.id} className="border-b border-slate-100 last:border-0"><td className="px-4 py-3 font-medium">{item.action}</td><td>{item.actor_type}</td><td>{item.resource_type}</td><td>{item.created_at}</td><td><button type="button" onClick={() => onViewSession(sessionID)} className="focus-ring rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50">View</button></td></tr>)}</tbody>
+          </table>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function TenantTemplates({ templates, onPreview }: { templates: Template[]; onPreview: (template: Template) => void }) {
   if (templates.length === 0) return <p className="rounded-lg border border-dashed border-slate-300 py-10 text-center text-sm text-slate-400">No templates</p>;
   return (
@@ -313,6 +340,9 @@ export function TenantDetailPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [subLoading, setSubLoading] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
+  const [selectedAuditSession, setSelectedAuditSession] = useState('');
+  const [selectedAuditLogs, setSelectedAuditLogs] = useState<AuditLog[]>([]);
+  const [auditSessionLoading, setAuditSessionLoading] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -353,8 +383,8 @@ export function TenantDetailPage() {
           break;
         }
         case 'audit': {
-          const res = await list<AuditLog>(`/admin/api/v1/audit-logs`);
-          setAuditLogs(res.data.filter((a: any) => a.tenant_id === tenantId || !a.tenant_id));
+          const res = await listPage<AuditLog>('/admin/api/v1/audit-logs', { tenant_id: tenantId, per_page: 100 });
+          setAuditLogs(res.data);
           break;
         }
       }
@@ -365,7 +395,7 @@ export function TenantDetailPage() {
   }, [toast]);
 
   useEffect(() => {
-    if (!id || tab === 'overview' || tab === 'features' || tab === 'channels' || tab === 'providers') return;
+    if (!id || tab === 'overview' || tab === 'integration' || tab === 'features' || tab === 'channels' || tab === 'providers') return;
     loadSubData(tab, id);
   }, [id, tab, loadSubData]);
 
@@ -399,6 +429,20 @@ export function TenantDetailPage() {
     }
   }
 
+  async function viewAuditSession(sessionID: string) {
+    setSelectedAuditSession(sessionID);
+    setAuditSessionLoading(true);
+    try {
+      const res = await listPage<AuditLog>('/admin/api/v1/audit-logs', { tenant_id: id, q: sessionID, per_page: 100 });
+      setSelectedAuditLogs(res.data.filter((item) => (item.session_id || 'No session') === sessionID));
+    } catch (err) {
+      toast.error('Unable to load audit session', getErrorMessage(err));
+      setSelectedAuditLogs([]);
+    } finally {
+      setAuditSessionLoading(false);
+    }
+  }
+
   function confirmToggle(kind: string, name: string, active: boolean, onConfirm: () => void) {
     requestConfirm({
       title: `${active ? 'Enable' : 'Disable'} ${kind}`,
@@ -410,8 +454,8 @@ export function TenantDetailPage() {
     });
   }
 
-  const tabs = ['overview', isPlatform && 'features', isPlatform && 'channels', isPlatform && 'providers', 'contacts', 'groups', 'templates', 'campaigns', 'api-keys', 'audit'].filter(Boolean) as string[];
-  const tabMeta: Record<string, { label: string; icon: typeof Activity }> = { overview:{label:'Overview',icon:LayoutDashboard}, features:{label:'Capabilities',icon:Layers3}, channels:{label:'Channels',icon:Bell}, providers:{label:'Providers',icon:Plug}, contacts:{label:'Contacts',icon:UserRound}, groups:{label:'Groups',icon:Users}, templates:{label:'Templates',icon:FileText}, campaigns:{label:'Campaigns',icon:Megaphone}, 'api-keys':{label:'API keys',icon:KeyRound}, audit:{label:'Audit log',icon:ScrollText} };
+  const tabs = ['overview', 'integration', isPlatform && 'features', isPlatform && 'channels', isPlatform && 'providers', 'contacts', 'groups', 'templates', 'campaigns', 'api-keys', 'audit'].filter(Boolean) as string[];
+  const tabMeta: Record<string, { label: string; icon: typeof Activity }> = { overview:{label:'Overview',icon:LayoutDashboard}, integration:{label:'Integration',icon:Code2}, features:{label:'Capabilities',icon:Layers3}, channels:{label:'Channels',icon:Bell}, providers:{label:'Providers',icon:Plug}, contacts:{label:'Contacts',icon:UserRound}, groups:{label:'Groups',icon:Users}, templates:{label:'Templates',icon:FileText}, campaigns:{label:'Campaigns',icon:Megaphone}, 'api-keys':{label:'API keys',icon:KeyRound}, audit:{label:'Audit log',icon:ScrollText} };
 
   if (loading) return <Panel title="Tenant Detail"><div className="py-8 text-center text-slate-400">Loading...</div></Panel>;
   if (error) return <Panel title="Tenant Detail"><div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div></Panel>;
@@ -422,6 +466,7 @@ export function TenantDetailPage() {
     if (subLoading) return <div className="py-8 text-center text-slate-400">Loading...</div>;
     switch (tab) {
       case 'overview': return <OverviewSection overview={ov} />;
+      case 'integration': return <IntegrationGuide endpoint={`/admin/api/v1/tenants/${ov.tenant.id}/integration`} platformTenantId={ov.tenant.id} />;
       case 'features': return (
         <div>
           <div className="mb-5 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
@@ -516,7 +561,7 @@ export function TenantDetailPage() {
       case 'templates': return <TenantTemplates templates={templates} onPreview={setPreviewTemplate} />;
       case 'campaigns': return <GenericTable columns={[{key:'name',label:'Name'},{key:'status',label:'Status'},{key:'scheduled_at',label:'Scheduled'},{key:'created_at',label:'Created'}]} rows={campaigns} />;
       case 'api-keys': return <GenericTable columns={[{key:'name',label:'Name'},{key:'status',label:'Status'},{key:'last_used_at',label:'Last Used'},{key:'created_at',label:'Created'}]} rows={apiKeys} />;
-      case 'audit': return <GenericTable columns={[{key:'action',label:'Action'},{key:'actor_type',label:'Actor'},{key:'resource_type',label:'Resource'},{key:'created_at',label:'Time'}]} rows={auditLogs} />;
+      case 'audit': return <TenantAuditTable rows={auditLogs} onViewSession={viewAuditSession} />;
       default: return null;
     }
   }
@@ -541,6 +586,14 @@ export function TenantDetailPage() {
         {renderTabContent()}
       </Panel>
       {previewTemplate && <TenantTemplatePreview template={previewTemplate} onClose={() => setPreviewTemplate(null)} />}
+      {selectedAuditSession && <Modal title="Audit session" description={selectedAuditSession} onClose={() => { setSelectedAuditSession(''); setSelectedAuditLogs([]); }} width="max-w-4xl" footer={<ModalButton onClick={() => { setSelectedAuditSession(''); setSelectedAuditLogs([]); }}>Close</ModalButton>}>
+        {auditSessionLoading ? <div className="py-12 text-center text-slate-400">Loading session events...</div> : selectedAuditLogs.length === 0 ? <div className="py-12 text-center text-slate-400">No audit events found for this session</div> : <div className="max-h-[65vh] overflow-auto px-6 py-5">
+          <table className="w-full min-w-[780px] text-left text-sm">
+            <thead className="border-b border-slate-200 text-slate-500"><tr><th className="py-2">Action</th><th>Actor</th><th>Resource</th><th>Resource ID</th><th>Request</th><th>IP</th><th>Time</th></tr></thead>
+            <tbody>{selectedAuditLogs.map((item) => <tr key={item.id} className="border-b border-slate-100"><td className="py-3 font-medium">{item.action}</td><td>{item.actor_type}</td><td>{item.resource_type}</td><td className="font-mono text-xs">{item.resource_id || '-'}</td><td className="font-mono text-xs">{item.request_id || '-'}</td><td>{item.ip_address || '-'}</td><td>{item.created_at}</td></tr>)}</tbody>
+          </table>
+        </div>}
+      </Modal>}
       {confirmDialog}
     </div>
   );

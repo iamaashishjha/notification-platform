@@ -117,10 +117,10 @@ func TestTestProviderConfigDecrypts(t *testing.T) {
 		end = len(src)
 	}
 	body := src[idx:end]
-	if !strings.Contains(body, "security.Decrypt(") {
-		t.Error("TestProviderConfig must call security.Decrypt on config_json")
+	if !strings.Contains(body, "decryptProviderConfigJSON(") {
+		t.Error("TestProviderConfig must decrypt config_json through decryptProviderConfigJSON")
 	}
-	if strings.Contains(body, ".Decrypt(") && strings.Contains(body, "encryption failed") {
+	if strings.Contains(body, "decryptProviderConfigJSON(") && strings.Contains(body, "decryption failed") {
 		t.Log("TestProviderConfig handles decryption errors correctly")
 	}
 }
@@ -147,6 +147,16 @@ func TestUpdateProviderConfigEncrypts(t *testing.T) {
 	count := strings.Count(src, "security.Encrypt(")
 	if count < 2 {
 		t.Errorf("expected at least 2 security.Encrypt calls (create + update), got %d", count)
+	}
+}
+
+func TestProviderConfigEncryptionStoredAsJSON(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "encryptedProviderConfigJSON") || !strings.Contains(src, "json.Marshal(encrypted)") {
+		t.Error("provider config encryption must be wrapped as valid JSON for jsonb storage")
+	}
+	if !strings.Contains(src, "decryptProviderConfigJSON") || !strings.Contains(src, "json.Unmarshal([]byte(raw), &encrypted)") {
+		t.Error("provider config decryption must support JSON-string encrypted values")
 	}
 }
 
@@ -327,6 +337,61 @@ func TestSendPublicNotificationExists(t *testing.T) {
 	src := openSource(t)
 	if !strings.Contains(src, "func (h Handler) SendPublicNotification") {
 		t.Fatal("SendPublicNotification handler not found")
+	}
+}
+
+func TestNotificationExplorerHasDetailHandler(t *testing.T) {
+	src := openSource(t)
+	if !strings.Contains(src, "func (h Handler) GetNotificationDetail") {
+		t.Fatal("GetNotificationDetail handler not found")
+	}
+	if !strings.Contains(src, "maskRecipientJSON") {
+		t.Error("notification detail must mask recipient data")
+	}
+	if !strings.Contains(src, "failures.Normalize") {
+		t.Error("notification detail must include normalized failure classifications")
+	}
+}
+
+func TestNotificationLogsPaginationAndFiltering(t *testing.T) {
+	src := openSource(t)
+	idx := strings.Index(src, "func (h Handler) ListNotificationLogs")
+	if idx < 0 {
+		t.Fatal("ListNotificationLogs handler not found")
+	}
+	end := strings.Index(src[idx:], "func (h Handler) GetNotificationDetail")
+	if end < 0 {
+		t.Fatal("GetNotificationDetail handler not found after ListNotificationLogs")
+	}
+	end += idx
+	body := src[idx:end]
+	if !strings.Contains(body, "pagination(r)") || !strings.Contains(body, "paginationMeta(page, perPage, total)") {
+		t.Error("ListNotificationLogs must use server-side pagination metadata")
+	}
+	for _, filter := range []string{`"search"`, `"channel"`, `"provider"`, `"status"`, `"tenant_id"`} {
+		if !strings.Contains(body, filter) {
+			t.Errorf("ListNotificationLogs missing filter %s", filter)
+		}
+	}
+}
+
+func TestIntegrationGuideHandlersExistAndAreTenantScoped(t *testing.T) {
+	src := openSource(t)
+	for _, fn := range []string{"GetMyIntegrationGuide", "GetTenantIntegrationGuide", "integrationGuideData"} {
+		if !strings.Contains(src, "func (h Handler) "+fn) {
+			t.Fatalf("%s handler/helper not found", fn)
+		}
+	}
+	if !strings.Contains(src, "p.TenantID != tenantID") {
+		t.Error("tenant integration support route must deny cross-tenant access for non-platform users")
+	}
+	idx := strings.Index(src, "func (h Handler) integrationGuideData")
+	if idx < 0 {
+		t.Fatal("integrationGuideData helper not found")
+	}
+	body := src[idx:]
+	if strings.Contains(body, `"api_key"`) || strings.Contains(body, "key_hash") {
+		t.Error("integration guide must not return existing API key secrets")
 	}
 }
 

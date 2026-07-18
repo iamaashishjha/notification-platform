@@ -147,7 +147,11 @@ RETURNING id::text`
 			if err := tx.QueryRow(ctx, insertDelivery, tenantID, notificationID, channel, targetJSON).Scan(&deliveryID); err != nil {
 				return Accepted{}, err
 			}
-			if err := s.queue.Publish(ctx, channelQueue(channel), queue.Job{TenantID: tenantID, NotificationID: notificationID, DeliveryID: deliveryID, Channel: channel, Payload: jobPayload}); err != nil {
+			control, err := queue.EnsureControl(ctx, s.db, tenantID, channel)
+			if err != nil {
+				return Accepted{}, err
+			}
+			if err := s.queue.Publish(ctx, channelQueue(channel), queue.Job{TenantID: tenantID, NotificationID: notificationID, DeliveryID: deliveryID, Channel: channel, QueueName: control.QueueName, Payload: jobPayload}); err != nil {
 				return Accepted{}, err
 			}
 		}
@@ -198,7 +202,11 @@ LIMIT 100`
 			if err := s.db.QueryRow(ctx, `INSERT INTO notification_deliveries (tenant_id, notification_id, channel, provider, status, scheduled_at) VALUES ($1,$2,$3,'mock','queued',now()) RETURNING id::text`, tenantID, notificationID, channel).Scan(&deliveryID); err != nil {
 				return err
 			}
-			if err := s.queue.Publish(ctx, channelQueue(channel), queue.Job{TenantID: tenantID, NotificationID: notificationID, DeliveryID: deliveryID, Channel: channel, Payload: jobPayload}); err != nil {
+			control, err := queue.EnsureControl(ctx, s.db, tenantID, channel)
+			if err != nil {
+				return err
+			}
+			if err := s.queue.Publish(ctx, channelQueue(channel), queue.Job{TenantID: tenantID, NotificationID: notificationID, DeliveryID: deliveryID, Channel: channel, QueueName: control.QueueName, Payload: jobPayload}); err != nil {
 				return err
 			}
 		}

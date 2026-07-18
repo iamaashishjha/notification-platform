@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
-import { list } from '../../api/client';
+import { listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
+import { TablePagination } from '../../components/TablePagination';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type Permission = {
   id: string;
@@ -13,10 +16,12 @@ export function PermissionsPage() {
   const [items, setItems] = useState<Permission[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination();
 
   useEffect(() => {
     setLoading(true);
-    list<Permission>('/admin/api/v1/permissions').then((res) => {
+    listPage<Permission>('/admin/api/v1/permissions', { page, per_page: perPage }).then((res) => {
       setItems(res.data.map((p: any) => {
         if (Array.isArray(p.roles)) return p;
         if (typeof p.roles !== 'string') return { ...p, roles: [] };
@@ -26,8 +31,9 @@ export function PermissionsPage() {
           catch { return { ...p, roles: [] }; }
         }
       }));
+      setMeta(res.meta);
     }).catch((err) => setError(err.message)).finally(() => setLoading(false));
-  }, []);
+  }, [page, perPage]);
 
   const categories: Record<string, Permission[]> = {};
   for (const p of items) {
@@ -76,6 +82,7 @@ export function PermissionsPage() {
           ))}
         </div>
       )}
+      {!loading && <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />}
     </Panel>
   );
 }

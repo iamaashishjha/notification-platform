@@ -1,15 +1,19 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { apiRequest, list } from '../../api/client';
+import { FormEvent, useEffect, useState } from 'react';
+import { apiRequest, list, listPage } from '../../api/client';
 import { Panel } from '../../components/Panel';
 import { Modal, ModalButton } from '../../components/Modal';
 import { Button, RowActionButton } from '../../components/Button';
 import { SearchSelect } from '../../components/SearchSelect';
 import { TenantFilter } from '../../components/TenantFilter';
 import { StatusBadge } from '../../components/StatusBadge';
+import { TablePagination } from '../../components/TablePagination';
+import { FilterToolbar, SearchControl } from '../../components/ListFilters';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { useAuth } from '../../auth/AuthContext';
-import { Eye, Plus, Search, Trash2, UserPlus, UserX, X } from 'lucide-react';
+import { Eye, Plus, Trash2, UserPlus, UserX, X } from 'lucide-react';
 import { useToast } from '../../components/Toast';
+import { usePagination } from '../../hooks/usePagination';
+import type { PaginationMeta } from '../../types/api';
 
 type Group = { id: string; tenant_id: string; tenant_name?: string; name: string; description: string; member_count: number; status: string; created_at: string };
 type Contact = { id: string; name: string; email: string; phone: string };
@@ -35,16 +39,18 @@ export function GroupsPage() {
   const [loading, setLoading] = useState(true);
   const [tenantFilter, setTenantFilter] = useState('');
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [meta, setMeta] = useState<PaginationMeta>();
+  const { page, perPage, setPage, setPerPage } = usePagination([tenantFilter, search]);
 
   const load = () => {
     setLoading(true);
-    list<Group>('/admin/api/v1/groups' + (tenantFilter ? `?tenant_id=${encodeURIComponent(tenantFilter)}` : ''))
-      .then((res) => setItems(res.data))
+    listPage<Group>('/admin/api/v1/groups', { tenant_id: tenantFilter, q: search, page, per_page: perPage })
+      .then((res) => { setItems(res.data); setMeta(res.meta); })
       .catch((err) => toast.error('Unable to load groups', err instanceof Error ? err.message : 'Load failed')).finally(() => setLoading(false));
   };
   const loadContacts = () => list<Contact>('/admin/api/v1/contacts').then((res) => setContacts(res.data)).catch(() => {});
 
-  useEffect(() => { load(); loadContacts(); }, [tenantFilter]);
+  useEffect(() => { load(); loadContacts(); }, [tenantFilter, search, page, perPage]);
   useEffect(() => { if (isPlatform) list<Tenant>('/admin/api/v1/tenants').then((res) => setTenants(res.data)).catch(() => {}); }, [isPlatform]);
 
   async function loadMembers(groupId: string) {
@@ -93,28 +99,25 @@ export function GroupsPage() {
   }
 
   const expandedGroup = items.find((item)=>item.id===expanded);
-  const visible = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return items.filter((item) => !query || [item.name, item.description, item.tenant_name].some((value) => value?.toLowerCase().includes(query)));
-  }, [items, search]);
   return (<>
     <Panel title="Contact Groups" actions={can('groups.create') ? <Button onClick={() => { setFormError(''); setShowForm(!showForm); }} variant="primary" icon={showForm ? X : Plus}>{showForm ? 'Cancel' : 'Create group'}</Button> : undefined}>
-      <div className="mb-5 flex gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <label className="relative flex-1"><Search className="absolute left-3 top-2.5 text-slate-400" size={16} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search group, description, or tenant" className="focus-ring w-full rounded-md border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm" /></label>
+      <FilterToolbar>
+        <SearchControl id="group-search" label="Search groups" value={search} onChange={setSearch} placeholder="Group, description, or tenant" />
         {isPlatform && <TenantFilter value={tenantFilter} onChange={setTenantFilter} tenants={tenants} />}
-      </div>
+      </FilterToolbar>
 
       {loading ? (
         <div className="py-8 text-center text-slate-400">Loading...</div>
-      ) : visible.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="py-8 text-center text-slate-400">No groups found</div>
       ) : (
+        <>
         <table data-no-datatable="true" className="w-full text-left text-sm">
           <thead className="border-b border-slate-200 text-slate-500">
             <tr><th className="py-2">Name</th>{isPlatform && <th>Tenant</th>}<th>Members</th><th>Status</th><th /></tr>
           </thead>
           <tbody>
-            {visible.map((item) => (
+            {items.map((item) => (
               <>
                 <tr key={item.id} className="border-b border-slate-100">
                   <td className="py-3 font-medium">{item.name}</td>
@@ -137,6 +140,8 @@ export function GroupsPage() {
             ))}
           </tbody>
         </table>
+        <TablePagination meta={meta} page={page} perPage={perPage} onPageChange={setPage} onPerPageChange={setPerPage} />
+        </>
       )}
     </Panel>
     {showForm&&<Modal title="Create contact group" description="Create a reusable audience for notification delivery." onClose={()=>setShowForm(false)} width="max-w-2xl" footer={<><ModalButton onClick={()=>setShowForm(false)}>Cancel</ModalButton><ModalButton variant="primary" disabled={saving} onClick={()=>document.getElementById('group-create-form')?.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))}>{saving?'Creating...':'Create group'}</ModalButton></>}><form id="group-create-form" onSubmit={submit} className="space-y-4 px-6 py-5">{formError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{formError}</div>}<label className="block text-sm"><span className="mb-1 block font-medium">Group name</span><input value={name} onChange={(e)=>setName(e.target.value)} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2" required/></label><label className="block text-sm"><span className="mb-1 block font-medium">Description</span><textarea value={description} onChange={(e)=>setDescription(e.target.value)} rows={3} className="focus-ring w-full rounded-md border border-slate-300 px-3 py-2"/></label></form></Modal>}
