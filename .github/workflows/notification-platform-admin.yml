@@ -1,0 +1,116 @@
+name: Build, Publish & Deploy Admin
+
+run-name: >-
+  Admin pipeline for ${{ github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "notification-admin-ui/**"
+      - ".github/workflows/notification-platform-admin.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: notification-platform-admin-production
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare image metadata
+    runs-on: ubuntu-latest
+    outputs:
+      image_namespace: ${{ steps.metadata.outputs.image_namespace }}
+      image_tag: ${{ steps.metadata.outputs.image_tag }}
+    steps:
+      - name: Generate image namespace and tag
+        id: metadata
+        shell: bash
+        run: |
+          namespace="${GITHUB_REPOSITORY_OWNER,,}"
+          tag="$GITHUB_REF_NAME"
+
+          # Docker tags only support letters, numbers, underscores, periods and dashes.
+          tag="$(sed -E 's/[^a-zA-Z0-9_.-]+/-/g; s/^[.-]+//; s/[.-]+$//' <<< "$tag")"
+          [[ -n "$tag" ]] || tag="sha-${GITHUB_SHA::12}"
+
+          echo "image_namespace=$namespace" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build_admin:
+    name: Build and publish admin image
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.PAT_GITHUB_TOKEN || github.token }}
+
+      - name: Build and publish notification-platform-admin
+        uses: docker/build-push-action@v6
+        with:
+          context: notification-admin-ui
+          file: notification-admin-ui/Dockerfile
+          target: prod
+          push: true
+          provenance: false
+          tags: |
+            ghcr.io/${{ needs.prepare.outputs.image_namespace }}/notification-platform-admin:${{ needs.prepare.outputs.image_tag }}
+            ghcr.io/${{ needs.prepare.outputs.image_namespace }}/notification-platform-admin:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/${{ needs.prepare.outputs.image_namespace }}/notification-platform-admin:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ needs.prepare.outputs.image_namespace }}/notification-platform-admin:buildcache,mode=max
+          build-args: |
+            BUILDKIT_PROGRESS=plain
+            VITE_API_BASE_URL=https://api-notification-platform.aashishjha.com.np
+
+  promote:
+    name: Promote image to latest
+    needs:
+      - prepare
+      - build_admin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.PAT_GITHUB_TOKEN || github.token }}
+
+      - name: Promote notification-platform-admin
+        shell: bash
+        run: |
+          IMAGE="ghcr.io/${{ needs.prepare.outputs.image_namespace }}/notification-platform-admin"
+          docker pull "$IMAGE:${{ github.sha }}"
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:latest"
+          docker push "$IMAGE:latest"
+
+  deploy:
+    name: Deploy application
+    needs: promote
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Pull image and start service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          timeout: 60s
+          command_timeout: 45m
+          script: |
+            ${{ vars.DEPLOY_SCRIPT_PATH }}/infra-auto-deploy notification_platform_admin up
